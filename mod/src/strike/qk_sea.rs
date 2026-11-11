@@ -402,6 +402,9 @@ pub struct HandOff {
     pub poles: Vec<[f64; 2]>,
     pub siren: f32,
     pub seed: u32,
+    /// The coast's middle and the way inland from it (the sea the other way): the wave comes from the side the sea drew
+    /// back from, wherever the player has gone since (`on_sea_axis`).
+    pub sea: ([f64; 3], [f64; 2]),
 }
 thread_local! {
     static PENDING: RefCell<Option<HandOff>> = const { RefCell::new(None) };
@@ -440,6 +443,16 @@ pub fn take_pending() -> Option<HandOff> {
 pub fn activate(h: HandOff) {
     ACTIVE.with(|p| *p.borrow_mut() = Some(h));
 }
+/// The coast of the Tsunami about to be fired for a quake (lib.rs's `fire_at`), if it is one.
+pub fn active_sea() -> Option<([f64; 3], [f64; 2])> {
+    ACTIVE.with(|p| p.borrow().as_ref().map(|h| h.sea))
+}
+/// Where the Tsunami takes the player to be, so that its wave comes in from the sea the quake drew back (`HandOff::sea`):
+/// on the line inland from the coast's middle, as far inland as they are (at least a little), at their height.
+pub fn on_sea_axis(t: [f64; 3], nm: [f64; 2], me: [f64; 3]) -> [f64; 3] {
+    let d = ((me[0] - t[0]) * nm[0] + (me[2] - t[2]) * nm[1]).max(24.0);
+    [t[0] + d * nm[0], me[1], t[2] + d * nm[1]]
+}
 pub fn take_active() -> Option<HandOff> {
     ACTIVE.with(|p| p.borrow_mut().take())
 }
@@ -447,13 +460,14 @@ pub fn take_active() -> Option<HandOff> {
 /// How loud a pole's sounds are where they are made, at the player's 100% (the game takes a volume over 1 as more
 /// reach, not more loudness: a pole's sounds fade out linearly over their `attenuation_distance`, 400, in sounds.json).
 pub const QT_POLE_VOL: f32 = 0.55;
-/// The pause in a broadcast after its closing chime, where the announcement is spoken (seconds).
-pub const QT_VOICE: f64 = 14.0;
+/// A broadcast's whole cycle (seconds): the siren twice, then its announcement spoken, then again (Oiso's poles on 30
+/// July 2025, the Kamchatka M8.8's Tsunami Warning: blasts 11 s apart, some 12 s of voice, the next at 31 s).
+pub const QT_CYCLE: f64 = 31.0;
 
-/// The coast's disaster-prevention radio, from its poles: each broadcast a chime, then the siren in the JMA's pattern
-/// (a Major Tsunami Warning's 3 s on and 2 s off six times: `quake.major`, two blasts, three times; a Tsunami
-/// Warning's 5 s on and 6 s off four), a closing chime, then the pause the announcement is spoken in (`QT_VOICE`), and
-/// again, from `from` to `until`. Every pole is its own station: started some seconds apart from the next (each town's
+/// The coast's disaster-prevention radio, from its poles, as a town's sounds in life: no chime, the siren twice in the
+/// JMA's pattern (a Major Tsunami Warning's 3 s on and 2 s off: `quake.major`, two blasts, twice; a Tsunami Warning's
+/// 5 s on and 6 s off: `siren5`, twice), then the pause its announcement is spoken in, and again every `QT_CYCLE`,
+/// from `from` to `until`. Every pole is its own station: started some seconds apart from the next (each town's
 /// set off on its own), heard late by its distance (at 343 a second) and fainter, the far ones muffled and echoing
 /// (`_far`), so near the coast one wails while others answer from further off. `vol` the player's siren volume (1 as
 /// made); none at all at 0.
@@ -462,8 +476,7 @@ pub fn sirens(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], from: f64,
     if vol <= 0.0 {
         return;
     }
-    let (blast, every, n) = if major { ("major", 10.0, 3) } else { ("siren5", 11.0, 4) };
-    let cycle = 4.5 + every * f64::from(n) + 2.5 + QT_VOICE;
+    let (blast, every) = if major { ("major", 10.0) } else { ("siren5", 11.0) };
     for (k, &[x, z]) in poles.iter().enumerate() {
         let d = (x - me[0]).hypot(z - me[2]);
         let far = if d > 140.0 { "_far" } else { "" };
@@ -477,12 +490,9 @@ pub fn sirens(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], from: f64,
         };
         let mut c = from + late;
         while c < until {
-            push(p, c, "chime_up");
-            for i in 0..n {
-                push(p, c + 4.5 + every * f64::from(i), blast);
-            }
-            push(p, c + 4.5 + every * f64::from(n), "chime_down");
-            c += cycle;
+            push(p, c, blast);
+            push(p, c + every, blast);
+            c += QT_CYCLE;
         }
     }
     // (and further off still, past the poles: the player's own recording of a coast's sirens, if they put one in, faint)

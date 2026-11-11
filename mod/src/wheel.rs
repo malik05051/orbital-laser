@@ -11,7 +11,7 @@
 //! field to type one in. Drawn by the game from the
 //! shapes built here; GUI pixels, from the centre of the screen.
 use crate::lasers::{LASERS, Laser, is_ship};
-use crate::strike::{APPROACHES, ARRIVALS, COLOUR_RGB, COLOURS, Choice, FD_PATTERNS, QK_CUSTOM, qk_quake};
+use crate::strike::{APPROACHES, ARRIVALS, COLOUR_RGB, COLOURS, Choice, FD_PATTERNS, QK_CUSTOM, qk_custom_inputs, qk_quake, shindo_class};
 use horizon_mod_sdk::ui::{Draw, Point, Rect};
 use std::f32::consts::{PI, TAU};
 
@@ -89,6 +89,57 @@ fn quake_button(k: usize) -> Rect {
     let x = -w / 2.0 + QUAKE_LABEL_W + (0..k).map(quake_w).sum::<f32>() + BTN_GAP * k as f32;
     Rect { x, y: ROW_Y, w: quake_w(k), h: BTN_H }
 }
+/// The custom earthquake's row under the presets': MAG « ‹ 7.0 › »  DEPTH ‹ 10 km ›  SHINDO ‹ AUTO ›. Its pieces left
+/// to right: (rect, what it is: a label, a value, or a step (field, dir)).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum QkPiece {
+    Label(&'static str),
+    Value(u8),
+    Step(u8, i8),
+}
+const QK_STEP_W: f32 = 11.0;
+fn qk_custom_row() -> Vec<(Rect, QkPiece)> {
+    use QkPiece::*;
+    let items = [
+        (Label("MAGNITUDE"), 58.0),
+        (Step(0, -2), QK_STEP_W),
+        (Step(0, -1), QK_STEP_W),
+        (Value(0), 26.0),
+        (Step(0, 1), QK_STEP_W),
+        (Step(0, 2), QK_STEP_W),
+        (Label(""), 8.0),
+        (Label("DEPTH"), 34.0),
+        (Step(1, -1), QK_STEP_W),
+        (Value(1), 44.0),
+        (Step(1, 1), QK_STEP_W),
+        (Label(""), 8.0),
+        (Label("SHINDO"), 40.0),
+        (Step(2, -1), QK_STEP_W),
+        (Value(2), 30.0),
+        (Step(2, 1), QK_STEP_W),
+    ];
+    let w: f32 = items.iter().map(|i| i.1).sum::<f32>() + BTN_GAP * (items.len() - 1) as f32;
+    let y = ROW_Y + BTN_H + BTN_GAP + 2.0;
+    let mut x = -w / 2.0;
+    items
+        .iter()
+        .map(|&(p, iw)| {
+            let r = Rect { x, y, w: iw, h: BTN_H };
+            x += iw + BTN_GAP;
+            (r, p)
+        })
+        .collect()
+}
+/// The custom earthquake's values as the row shows them.
+fn qk_custom_text(field: u8) -> String {
+    let (mw, depth, sh) = qk_custom_inputs();
+    match field {
+        0 => format!("{mw:.1}"),
+        1 => format!("{depth:.0} km"),
+        _ => sh.map_or("AUTO".to_string(), |s| shindo_class(s).0.to_string()),
+    }
+}
+
 fn impact_button(k: usize) -> Rect {
     let w = IMPACT_LABEL_W + IMPACT_W.iter().sum::<f32>() + BTN_GAP * 3.0;
     let x = -w / 2.0 + IMPACT_LABEL_W + IMPACT_W[..k].iter().sum::<f32>() + BTN_GAP * k as f32;
@@ -118,6 +169,8 @@ pub enum Spot {
     Crease(usize),
     /// The Earthquake's row: which historic earthquake.
     Quake(usize),
+    /// The custom earthquake's row: a step of its magnitude (0), depth (1) or Shindo (2), down or up (±2 a bigger step).
+    QkStep(u8, i8),
     /// The knockback's switch, and the follow camera's.
     Knock,
     Follow,
@@ -355,6 +408,13 @@ pub fn spot(x: f32, y: f32, rows: impl Into<Rows>, page: usize) -> Option<Spot> 
         for k in 0..=QK_CUSTOM {
             if inside(&quake_button(k), x, y) {
                 return Some(Spot::Quake(k));
+            }
+        }
+        for (r, p) in qk_custom_row() {
+            if let QkPiece::Step(f, d) = p
+                && inside(&r, x, y)
+            {
+                return Some(Spot::QkStep(f, d));
             }
         }
     }
@@ -663,6 +723,29 @@ impl Wheel {
                 out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - rim, w: b.w, h: rim }, rim_c)));
                 text(&mut out, p.button, b.x + b.w / 2.0, b.y + 2.0, if chosen || hovered { ms.rgb } else { 0x9AA2AE });
             }
+            // the custom one's numbers, under them (a step picks CUSTOM too)
+            let custom = quake == QK_CUSTOM;
+            for (b, p) in qk_custom_row() {
+                match p {
+                    QkPiece::Label(l) => text(&mut out, l, b.x + b.w / 2.0, b.y + 2.0, if custom { 0xB8BEC8 } else { 0x7A808A }),
+                    QkPiece::Value(f) => {
+                        out.push(Draw::Fill((b, 0xE0101318)));
+                        out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - 1.0, w: b.w, h: 1.0 }, argb(0x90, shade(ms.rgb, 0.6)))));
+                        text(&mut out, &qk_custom_text(f), b.x + b.w / 2.0, b.y + 2.0, if custom { ms.rgb } else { 0x9AA2AE });
+                    }
+                    QkPiece::Step(f, d) => {
+                        let hovered = self.hover == Some(Spot::QkStep(f, d));
+                        out.push(Draw::Fill((b, if hovered { argb(0xE6, shade(ms.rgb, 0.42)) } else { 0xE0181C22 })));
+                        let glyph = match d {
+                            -2 => "<<",
+                            -1 => "-",
+                            1 => "+",
+                            _ => ">>",
+                        };
+                        text(&mut out, glyph, b.x + b.w / 2.0, b.y + 2.0, if hovered { ms.rgb } else { 0xB8BEC8 });
+                    }
+                }
+            }
         }
         if let Some(rl) = row.filter(|&i| is_ship(LASERS[i])) {
             let ms = LASERS[rl];
@@ -712,7 +795,15 @@ impl Wheel {
                 let q = qk_quake(k.min(QK_CUSTOM));
                 (format!("{}, Mw {:.1}, Shindo {}{}{}", q.name, q.mw, q.top_class(), if q.estimated { " est." } else { "" }, if q.tsunami.is_some() { ", tsunami" } else { "" }), 0x8C93A0)
             }
-            Some(Spot::Knock) => ("The Nuke's and the Rod's push on you on or off".to_string(), 0x8C93A0),
+            Some(Spot::QkStep(f, d)) => (
+                match f {
+                    0 => format!("Magnitude {} (5.0 to 9.6)", if d.abs() >= 2 { "by 0.25" } else { "by 0.1" }),
+                    1 => "Depth: shallow ones break the surface, deep ones shake less".to_string(),
+                    _ => "Highest Shindo: AUTO works it out from magnitude and depth".to_string(),
+                },
+                0x8C93A0,
+            ),
+            Some(Spot::Knock) => ("Push on you: thrown by blasts, waves and Shindo 6+ shaking".to_string(), 0x8C93A0),
             Some(Spot::Follow) => ("Camera chases the Nuke's or Payload's bomb down".to_string(), 0x8C93A0),
             Some(Spot::SeedField) => (
                 if locked { "Click to type a seed, 1 to 997: every strike looks the same" } else { "The last strike's seed. Click to type another, then lock it" }.to_string(),

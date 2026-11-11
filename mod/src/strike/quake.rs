@@ -339,6 +339,9 @@ const QK_BELOW: u32 = 40;
 const QK_ABOVE: u32 = 1;
 /// Chunks a read, and what one stage of the land's work may spend (fuel).
 const QK_PART: usize = 8;
+/// Furniture thrown about at most, a chunk and a strike (each a falling block for a moment).
+const QK_THROW_CHUNK: usize = 24;
+const QK_THROW_MAX: u32 = 320;
 const QK_STAGE: u64 = 5_000_000;
 
 /// The shaking's strength on the game's camera (0 to 1, which the game squares) for instrumental intensity `i`.
@@ -527,6 +530,9 @@ struct Pal {
     wood: bool,
     /// Ground that liquefies when wet (sand, silt, loose soil).
     soft: bool,
+    /// Furniture and things that stand loose in a room (beds, tables and workstations, lamps, pots, carpets, candles,
+    /// heads): from 6+ they slide and topple, at 7 they are thrown (`QK_THROW_MAX`). Never what holds items.
+    furn: bool,
 }
 
 /// The blocks the quake puts down itself, as ids past the read's palette.
@@ -589,6 +595,18 @@ fn classify(name: &str) -> Pal {
         wall: n.ends_with("_wall") && class == 7,
         wood: n.contains("planks") || n.ends_with("_log") || n.ends_with("_wood") || (class == 7 && woods.iter().any(|w| n.starts_with(w))),
         soft: matches!(n, "sand" | "red_sand" | "gravel" | "dirt" | "grass_block" | "coarse_dirt" | "mud" | "clay" | "podzol" | "rooted_dirt" | "farmland" | "dirt_path" | "suspicious_sand" | "suspicious_gravel"),
+        furn: !super::hurricane::stays(plain)
+            && (n.ends_with("_bed")
+                || n.ends_with("_carpet")
+                || n.ends_with("candle")
+                || n.ends_with("_pressure_plate")
+                || n.ends_with("_head")
+                || n.ends_with("_skull")
+                || n.starts_with("potted_")
+                || matches!(
+                    n,
+                    "crafting_table" | "cartography_table" | "fletching_table" | "smithing_table" | "loom" | "stonecutter" | "grindstone" | "anvil" | "chipped_anvil" | "damaged_anvil" | "composter" | "cauldron" | "bookshelf" | "enchanting_table" | "note_block" | "lantern" | "soul_lantern" | "flower_pot" | "decorated_pot" | "end_rod" | "scaffolding"
+                )),
     }
 }
 fn extra_pal(i: usize) -> Pal {
@@ -597,7 +615,7 @@ fn extra_pal(i: usize) -> Pal {
         6 => 5,
         _ => 2,
     };
-    Pal { name: EXTRA[i], class, glass: false, wall: false, wood: false, soft: matches!(i, 1 | 2 | 3 | 4 | 5 | 8) }
+    Pal { name: EXTRA[i], class, glass: false, wall: false, wood: false, soft: matches!(i, 1 | 2 | 3 | 4 | 5 | 8), furn: false }
 }
 
 /// A read's answer, its palette sorted out, and the chunks it holds.
@@ -633,6 +651,8 @@ struct Work {
     liquefied: u32,
     torn: u32,
     changed: u32,
+    /// Furniture thrown about (falling blocks: at most `QK_THROW_MAX` a strike).
+    thrown: u32,
     done: bool,
     /// The sea's work, for a quake that raised a tsunami: each chunk where it may reach, as this work leaves it.
     flood: Option<Rc<RefCell<qk_sea::Flood>>>,
@@ -861,6 +881,8 @@ fn qk_chunk(w: &mut Work, cur: &Cur, k: usize, q: &mut Plan) -> bool {
     let mut slid_any = false;
     let mut slid = [false; 256];
     let mut events: Vec<(u8, [f64; 3])> = Vec::new();
+    // furniture torn loose and thrown: (where, its block, how hard)
+    let mut throws: Vec<([f64; 3], &'static str, f64)> = Vec::new();
     for lz in 0..16 {
         for lx in 0..16 {
             let (gx, gz) = (lx + QK_M, lz + QK_M);
@@ -1019,6 +1041,20 @@ fn qk_chunk(w: &mut Work, cur: &Cur, k: usize, q: &mut Plan) -> bool {
                         col[at(g + 2)] = COBBLE;
                     }
                 }
+                // the furniture: from 6+ most of what isn't fixed down slides and topples, at 7 it is thrown (the JMA's
+                // table); a bed's head goes with its foot
+                let p_furn = ramp(&[(5.6, 0.0), (6.0, 0.3), (6.5, 0.7), (7.0, 0.95)], ii);
+                for y in g + 1..=hi {
+                    let p = cur.pal(col[at(y)]);
+                    if !p.furn || chance(x, z.wrapping_add(y * 17), seed, 78) >= p_furn {
+                        continue;
+                    }
+                    col[at(y)] = AIR;
+                    if !p.name.contains("part=head") && throws.len() < QK_THROW_CHUNK && w.thrown < QK_THROW_MAX {
+                        w.thrown += 1;
+                        throws.push(([f64::from(x) + 0.5, f64::from(y) + 0.1, f64::from(z) + 0.5], p.name, smooth(5.6, 7.0, ii)));
+                    }
+                }
             }
             // liquefaction: soft ground near water boils up sand and mud, and what stands on it sinks a block
             let soft = cur.pal(col[at(g)]).soft;
@@ -1168,6 +1204,19 @@ fn qk_chunk(w: &mut Work, cur: &Cur, k: usize, q: &mut Plan) -> bool {
     if !b.runs.is_empty() {
         w.changed += 1;
         q.ev.push((t, Act::Blocks(Box::new(b))));
+    }
+    // the furniture thrown, as the edit takes it from where it stood
+    for (k, ([x, y, z], name, hard)) in throws.into_iter().enumerate() {
+        let h = |i: u32| chance(x as i32, z as i32 ^ (k as i32 * 7919), seed, 110 + i);
+        let a = h(0) * 2.0 * PI;
+        let v = (0.12 + 0.38 * hard) * (0.6 + 0.6 * h(1));
+        let vy = 0.08 + 0.42 * hard * hard * (0.5 + 0.6 * h(2));
+        let block = name.split('[').next().unwrap_or(name);
+        q.ev.push((t + 0.1 + 0.6 * h(3) as f32, Act::Cmd(format!(
+            "summon minecraft:falling_block {x:.2} {y:.2} {z:.2} {{BlockState:{{Name:\"{block}\"}},Time:1,DropItem:1b,HurtEntities:1b,FallHurtAmount:1.0f,FallHurtMax:4,Motion:[{:.3}d,{vy:.3}d,{:.3}d]}}",
+            v * a.cos(),
+            v * a.sin()
+        ))));
     }
     // what the slides left hanging (leaves whose trunk went, plants whose ground went)
     if slid_any {
@@ -1413,7 +1462,7 @@ fn after_env(a: &After, s_arr: f64, t: f64) -> f64 {
 /// A second of the shaking where the player is now: the jolts, being thrown about at 6+ and 7 (the knockback's switch),
 /// and the actionbar's Shindo.
 #[allow(clippy::too_many_arguments)]
-fn qk_second(q: &mut Plan, geo: Rc<QkGeo>, t0: f32, me0: [f64; 3], sea: Option<qk_sea::SeaTime>, afters: Rc<Vec<After>>) {
+fn qk_second(q: &mut Plan, geo: Rc<QkGeo>, t0: f32, me0: [f64; 3], sea: Option<qk_sea::SeaTime>, afters: Rc<Vec<After>>, terrain: bool) {
     let me = crate::sdk::game::get_player().map_or(me0, |p| [p.x, p.y, p.z]);
     let quake = geo.q;
     let (u, d) = geo.ud(me[0], me[2]);
@@ -1450,6 +1499,15 @@ fn qk_second(q: &mut Plan, geo: Rc<QkGeo>, t0: f32, me0: [f64; 3], sea: Option<q
             q.shake(t as f32, (0.75 * v * e * j).min(1.0) as f32, (hold * h) as f32);
             // (from 6+ no one stays on their feet: knocked a step or two any way, at 7 off the ground)
             let hard = smooth(5.8, 7.0, i_now) * e;
+            // (and what lies loose round them, items, mobs, armour stands: a few at a time, each its own way)
+            if terrain && hard > 0.2 {
+                for _ in 0..3 {
+                    let a = q.rng.next() * 2.0 * PI;
+                    let v = 0.15 + 0.45 * hard * q.rng.uniform(0.5, 1.0);
+                    let vy = 0.1 + 0.4 * hard * smooth(6.3, 7.0, i_now) * q.rng.next();
+                    q.at(t as f32, format!("execute positioned {:.1} {:.1} {:.1} as @e[type=!player,distance=..28,limit=1,sort=random] run data merge entity @s {{Motion:[{:.3}d,{vy:.3}d,{:.3}d]}}", me[0], me[1], me[2], v * a.cos(), v * a.sin()));
+                }
+            }
             if !thrown && hard > 0.25 && q.rng.next() < 0.7 {
                 thrown = true;
                 let a = q.rng.next() * 2.0 * PI;
@@ -1593,7 +1651,7 @@ fn qk_sounds(p: &mut Plan, geo: &QkGeo, me: [f64; 3], afters: &[After], poles: &
 
 /// The tsunami's warnings and sounds where the player is, until the quake hands over to the Tsunami: the JMA's warning
 /// as a title as it goes out (only then: the sea drawing back is seen, not announced), NHK's alert tone (`quake.nhk_alert`, the player's own
-/// recording, git-ignored: none without it) with a soft chime, the coast's sirens from the poles (`qk_sea::sirens`), the
+/// recording, git-ignored: none without it), no chime before it, the coast's sirens from the poles (`qk_sea::sirens`), the
 /// sea's hiss as it withdraws.
 #[allow(clippy::too_many_arguments)]
 fn qk_sea_warnings(p: &mut Plan, geo: &QkGeo, tsu: &qk_sea::Tsu, st: &qk_sea::SeaTime, me: [f64; 3], poles: &[[f64; 2]], cfg: &QkConfig) {
@@ -1609,9 +1667,6 @@ fn qk_sea_warnings(p: &mut Plan, geo: &QkGeo, tsu: &qk_sea::Tsu, st: &qk_sea::Se
     title(p, st.warn, "TSUNAMI", &format!("{major}  ·  {}  ·  get to high ground", tsu.expect), col);
     let alert = |p: &mut Plan, t: f64, vol: f32| p.ev.push((t as f32, Act::Sound { event: "orbital:quake.nhk_alert".into(), at: None, volume: vol, pitch: 1.0 }));
     alert(p, st.warn, 0.9);
-    for (n, pitch) in [1.5, 1.26, 1.0].into_iter().enumerate() {
-        p.sound((st.warn + 0.22 * n as f64) as f32, "block.note_block.chime", 3.0, pitch);
-    }
     let major = kind.starts_with("MAJOR");
     qk_sea::sirens(p, poles, geo.t[1], me, st.warn + 1.5, st.end + 0.4, major, cfg.siren, geo.seed);
     let (_, d) = geo.ud(me[0], me[2]);
@@ -1650,6 +1705,7 @@ pub struct QkConfig {
 thread_local! {
     static CONFIG: std::cell::Cell<QkConfig> = const { std::cell::Cell::new(QkConfig { countdown: qk_sea::QT_COUNTDOWN, siren: 1.0 }) };
     static CUSTOM: std::cell::Cell<Option<&'static Quake>> = const { std::cell::Cell::new(None) };
+    static CUSTOM_IN: std::cell::Cell<(f64, f64, Option<f64>)> = const { std::cell::Cell::new((7.0, 10.0, None)) };
 }
 pub fn qk_configure(c: QkConfig) {
     CONFIG.with(|x| x.set(c));
@@ -1675,8 +1731,9 @@ pub fn qk_quake(i: usize) -> &'static Quake {
 /// long as Wells and Coppersmith's (1994) regression has it (log L = 0.59 Mw - 2.44), as many subevents as its size,
 /// its tsunami's height by its magnitude and depth. Made once for each set of numbers and kept.
 pub fn qk_set_custom(mw: f64, depth: f64, shindo: Option<f64>) -> &'static Quake {
-    let mw = mw.clamp(5.0, 9.6);
+    let mw = (mw.clamp(5.0, 9.6) * 10.0).round() / 10.0;
     let depth = depth.clamp(1.0, 700.0);
+    CUSTOM_IN.with(|c| c.set((mw, depth, shindo.map(|s| s.clamp(0.5, 7.0)))));
     let shindo = shindo.unwrap_or_else(|| {
         // (the near-field intensity a quake like it brings, close over a shallow one, far less over a deep one)
         let x = depth.max(3.0);
@@ -1748,6 +1805,35 @@ pub fn qk_set_custom(mw: f64, depth: f64, shindo: Option<f64>) -> &'static Quake
     q
 }
 
+/// What the player set the custom earthquake to: its magnitude, depth (km) and highest Shindo (none: worked out).
+pub fn qk_custom_inputs() -> (f64, f64, Option<f64>) {
+    let _ = qk_quake(QK_CUSTOM);
+    CUSTOM_IN.with(std::cell::Cell::get)
+}
+/// The depths the wheel steps through (km), and the Shindos (none: worked out; then the JMA's classes' middles).
+pub const QK_DEPTHS: [f64; 17] = [1.0, 5.0, 10.0, 15.0, 20.0, 30.0, 40.0, 50.0, 60.0, 80.0, 100.0, 150.0, 200.0, 300.0, 400.0, 500.0, 700.0];
+pub const QK_SHINDOS: [Option<f64>; 10] = [None, Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(4.75), Some(5.25), Some(5.75), Some(6.25), Some(6.7)];
+/// The wheel's step of the custom earthquake: `field` 0 the magnitude (`dir` ±1 a tenth, ±2 a half), 1 the depth, 2 the
+/// Shindo (each to the next of its list).
+pub fn qk_custom_step(field: u8, dir: i8) -> &'static Quake {
+    let (mw, depth, sh) = qk_custom_inputs();
+    let next = |len: usize, at: usize| (at as i64 + i64::from(dir.signum())).clamp(0, len as i64 - 1) as usize;
+    match field {
+        0 => qk_set_custom(mw + f64::from(dir) * if dir.abs() >= 2 { 0.25 } else { 0.1 }, depth, sh),
+        1 => {
+            let at = QK_DEPTHS.iter().enumerate().min_by(|a, b| (a.1 - depth).abs().total_cmp(&(b.1 - depth).abs())).map_or(0, |x| x.0);
+            qk_set_custom(mw, QK_DEPTHS[next(QK_DEPTHS.len(), at)], sh)
+        }
+        _ => {
+            let at = QK_SHINDOS.iter().enumerate().min_by(|a, b| {
+                let d = |x: &Option<f64>| x.map_or(if sh.is_none() { -1.0 } else { 99.0 }, |v| (v - sh.unwrap_or(-50.0)).abs());
+                d(a.1).total_cmp(&d(b.1))
+            }).map_or(0, |x| x.0);
+            qk_set_custom(mw, depth, QK_SHINDOS[next(QK_SHINDOS.len(), at)])
+        }
+    }
+}
+
 /// The preset the pass draws earthquake `i` as (it knows the presets only): itself, or for the custom one the preset
 /// most like it (the same kind of fault, the nearest magnitude).
 pub fn qk_pass_preset(i: usize) -> usize {
@@ -1786,7 +1872,7 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
         let g = geo.clone();
         let a = afters.clone();
         let t0 = t;
-        p.soon(t0, move |q| qk_second(q, g, t0, me, sea, a));
+        p.soon(t0, move |q| qk_second(q, g, t0, me, sea, a, terrain));
         t += 1.0;
     }
     let poles = qk_sea::siren_sites(&geo, me);
@@ -1835,6 +1921,7 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
             liquefied: 0,
             torn: 0,
             changed: 0,
+            thrown: 0,
             done: false,
             flood: sea.map(|st| Rc::new(RefCell::new(qk_sea::Flood::new(geo.clone(), st)))),
         }));
@@ -1862,7 +1949,7 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
     if let Some(tsu) = quake.tsunami.as_ref() {
         let (kind, color) = qk_sea::warning(tsu);
         let k0 = qk_sea::wave_k(tsu);
-        qk_sea::set_pending(qk_sea::HandOff { flood: flood_out, k: k0, kind, color, expect: tsu.expect, major: kind.starts_with("MAJOR"), poles, siren: cfg.siren, seed: geo.seed });
+        qk_sea::set_pending(qk_sea::HandOff { flood: flood_out, k: k0, kind, color, expect: tsu.expect, major: kind.starts_with("MAJOR"), poles, siren: cfg.siren, seed: geo.seed, sea: (geo.t, geo.nm) });
         // the run-up: a tsunami runs on inland and up the land well over its height at the coast (Tohoku's 10 to 15
         // m ran up to 40), so the wave is made as big as it takes to reach the ground where the player stands as it
         // comes, up to `QT_RUNUP` times its own; higher ground than that is safe, as it is in life
@@ -1872,11 +1959,11 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
             let [x, _, z] = crate::sdk::game::get_player().map_or(me, |p| [p.x, p.y, p.z]);
             q.ev.push((t_ask, Act::Survey { tag, columns: vec![(x.floor() as i32, z.floor() as i32)] }));
         });
-        let (block, point) = (target.block, target.point);
+        let (block, point, gt, nm) = (target.block, target.point, geo.t, geo.nm);
         p.later((len - 1.0).max(0.3), move |_| {
             let now = crate::sdk::game::get_player().map_or(me, |p| [p.x, p.y, p.z]);
             let ground = crate::ground::at(now[0].floor() as i32, now[2].floor() as i32).map_or(now[1].floor(), f64::from);
-            let ts = super::tsunami::TsGeo::new(&Target { block, point }, now, 0.0);
+            let ts = super::tsunami::TsGeo::new(&Target { block, point }, qk_sea::on_sea_axis(gt, nm, now), 0.0);
             let k = qk_sea::run_up_k(&ts, ground, k0);
             qk_sea::with_pending(|h| h.k = k);
         });
@@ -2029,6 +2116,18 @@ mod tests {
     }
 
     #[test]
+    fn quake_tsunami_comes_from_the_sea_it_drew_back_wherever_the_player_went() {
+        let target = Target { block: [0, 62, 0], point: [0.5, 63.0, 0.5] };
+        let g = QkGeo::new(0, &target, [0.5, 70.0, 200.5], 17.0);
+        // (the player went off along the coast after firing: the wave still comes in from the sea, along nm)
+        for me in [[300.5, 80.0, 40.5], [-250.5, 66.0, 10.5], [0.5, 66.0, -30.5]] {
+            let at = qk_sea::on_sea_axis(g.t, g.nm, me);
+            let ts = super::super::tsunami::TsGeo::new(&target, at, 0.0);
+            assert!(ts.m[0] * g.nm[0] + ts.m[1] * g.nm[1] > 0.999, "{me:?}");
+        }
+    }
+
+    #[test]
     fn quake_tsunami_warns_without_announcing_the_sea_drawing_back() {
         let target = Target { block: [0, 64, 0], point: [0.5, 65.0, 0.5] };
         qk_configure(QkConfig { countdown: qk_sea::QT_COUNTDOWN, siren: 1.0 });
@@ -2066,7 +2165,13 @@ mod tests {
                 } else if y == 64 {
                     "minecraft:grass_block"
                 } else if house && y <= top {
-                    if (x + z) % 3 == 0 && y == 66 { "minecraft:glass" } else { "minecraft:oak_planks" }
+                    if (x + z) % 3 == 0 && y == 66 {
+                        "minecraft:glass"
+                    } else if y == 65 && x.rem_euclid(8) == 2 && z.rem_euclid(8) == 2 {
+                        "minecraft:crafting_table"
+                    } else {
+                        "minecraft:oak_planks"
+                    }
                 } else {
                     "minecraft:air"
                 });
@@ -2095,6 +2200,7 @@ mod tests {
             liquefied: 0,
             torn: 0,
             changed: 0,
+            thrown: 0,
             done: false,
             flood: None,
         };
@@ -2103,6 +2209,7 @@ mod tests {
         assert!(qk_chunk(&mut w, &cur, 1, &mut q));
         assert!(w.collapsed > 0, "houses down at Shindo 7");
         assert!(w.torn > 0, "the trace torn open");
+        assert!(w.thrown > 0 && q.ev.iter().any(|(_, a)| matches!(a, Act::Cmd(c) if c.contains("falling_block") && c.contains("crafting_table"))), "the furniture thrown");
         assert!(w.changed == 2);
         let edits: Vec<String> = q.ev.iter().filter_map(|(_, a)| if let Act::Blocks(b) = a { Some(b.as_fills()) } else { None }).flatten().collect();
         assert!(edits.iter().any(|f| f.contains("minecraft:air")));
