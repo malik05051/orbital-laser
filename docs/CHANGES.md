@@ -2,6 +2,18 @@
 
 What each release of Orbital Laser added, newest first. The current release is in the [README](../README.md#new-in-0514); each release's notes are in [docs/releases](releases).
 
+## Unreleased
+
+- **The Earthquake**, the twentieth laser, on the wheel's fourth page and `/orbital earthquake`. No beam: a historic
+  earthquake on the land round the target, picked on the wheel's QUAKE row or with `/orbital quake`: Tohoku 2011, Kobe
+  1995, Kanto 1923, Kumamoto 2016, Noto 2024 or Valdivia 1960. Everything goes by the JMA Shindo scale: each place's
+  Shindo, from its distance to the rupture, decides how hard the camera shakes, what the panel and the actionbar say
+  and what the land suffers (glass, block walls, wooden houses pancaked, cracks, landslides, liquefaction, fires), as
+  the JMA's table has it. The strike-slip faults tear the land open and offset it along their trace; Noto's heaves the
+  far side up 4 m. Those with an Earthquake Early Warning that day warn before the strong shaking. Those that raised a
+  tsunami (Tohoku, Kanto, Noto, Valdivia) end on a Major Tsunami Warning and then fire the Tsunami at the same target.
+  Its sounds are approved ones; its pass rolls the land and raises dust. Fork only for now (greyed out natively).
+
 ## 0.5.14
 
 - **The Carpet Bomb**, the nineteenth laser, on the wheel's fourth page and `/orbital carpetbomb`. No beam: a heavy bomber

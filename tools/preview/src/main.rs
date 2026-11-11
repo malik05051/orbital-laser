@@ -460,6 +460,10 @@ fn shot(kv: &HashMap<String, f32>) -> Shot {
 
     // ---- the frame uniform (the prelude's Frame) ----
     let wing = (me[1] - tgt[2]).atan2(me[0] - tgt[0]);
+    // (the Earthquake's pass reads the fault's strike where the wings' facing is, across the way to the player; the player
+    // and its preset where the ship's choices are: lib.rs's fire_at, `--set quake=N`)
+    let quake = (laser - 19.0).abs() < 0.5;
+    let wing = if quake { wing + std::f32::consts::FRAC_PI_2 } else { wing };
     let mut u: Vec<f32> = Vec::new();
     u.extend_from_slice(&view);
     u.extend_from_slice(&proj);
@@ -484,7 +488,11 @@ fn shot(kv: &HashMap<String, f32>) -> Shot {
     u.extend_from_slice(&[g("seed", 37.0), 1.0, 0.0, (tgt[1] - 1.0e-3).floor()]);
     // (strike.rs's df_reach)
     let reach = (360.0 - ((me[0] - tgt[0]).powi(2) + (me[1] - tgt[2]).powi(2)).sqrt()).max(40.0);
-    u.extend_from_slice(&[g("mode", 0.0), g("style", 0.0), g("reach", reach), g("colour", 0.0)]);
+    if quake {
+        u.extend_from_slice(&[me[0], tgt[1] + 1.0, me[1], g("quake", 0.0)]);
+    } else {
+        u.extend_from_slice(&[g("mode", 0.0), g("style", 0.0), g("reach", reach), g("colour", 0.0)]);
+    }
     // (camera_rest: none, the camera near the origin)
     u.extend_from_slice(&[0.0; 4]);
     // (the previous frame's camera: the same, the history valid)

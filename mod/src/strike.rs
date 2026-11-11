@@ -14,6 +14,8 @@ mod hurricane;
 mod nuke;
 mod rod;
 mod payload;
+mod quake;
+pub use quake::{QK_PRESETS, Quake, QkGeo, qk_preset, shake_of, shindo_class};
 mod sb_hand;
 mod sb_lift;
 mod sb_lodge;
@@ -702,6 +704,9 @@ pub fn plan(laser: &'static Laser, target: &Target, terrain: bool, dimension: &s
     }
     if laser.key == "carpetbomb" {
         return carpet::carpet_plan(laser, target, terrain, dimension, shader_seed, me);
+    }
+    if laser.key == "earthquake" {
+        return quake::quake_plan(laser, target, terrain, dimension, shader_seed, me, approach);
     }
     if laser.key == "skybreak" {
         return skybreak::skybreak_plan(laser, target, terrain, dimension, shader_seed, me);
@@ -4480,7 +4485,7 @@ mod tests {
             // (nor is the supercell: it leaves only pits, tracks and a small crater; strike/storm.rs's tests check them)
             // (nor the hurricane: it tears up only what stands on the land and its top; strike/hurricane.rs's tests check it)
             // (nor the tsunami: it sweeps what stands on the land it read, under its water; strike/tsunami.rs's tests check it)
-            if laser.key == "payload" || laser.key == "nuke" || laser.key == "rod" || laser.key == "supercell" || laser.key == "hurricane" || laser.key == "tsunami" || laser.key == "fold" || laser.key == "supervolcano" || laser.key == "skybreak" || laser.key == "carpetbomb" {
+            if laser.key == "payload" || laser.key == "nuke" || laser.key == "rod" || laser.key == "supercell" || laser.key == "hurricane" || laser.key == "tsunami" || laser.key == "fold" || laser.key == "supervolcano" || laser.key == "skybreak" || laser.key == "carpetbomb" || laser.key == "earthquake" {
                 continue;
             }
             for (dimension, sky) in [("minecraft:overworld", 319), ("minecraft:the_nether", 122)] {

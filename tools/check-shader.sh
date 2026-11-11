@@ -39,7 +39,7 @@ body() {
     cat "$shaders/$1.wgsl"
     [ "$1" != volcano ] || cat "$shaders/volcano_mount.wgsl"
 }
-for own in downfall planetkiller crystalbloom sinkhole payload nuke rod supercell hurricane tsunami fold volcano skybreak carpetbomb; do
+for own in downfall planetkiller crystalbloom sinkhole payload nuke rod supercell hurricane tsunami fold volcano skybreak carpetbomb earthquake; do
     { cat "$prelude"; pre "$own"; body "$own"; } > "$tmp"
     out=$("$bin" "$tmp" 2>&1) || { echo "the $own pass (strike.wgsl up to its fs_main, then $own.wgsl):"; echo "$out"; exit 1; }
     # the game takes a pass of 256 KiB at most

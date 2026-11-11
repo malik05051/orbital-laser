@@ -485,6 +485,7 @@ going in from its middle out as its front reaches them.
 | `/orbital payloadsound main`, `/orbital payloadsound alt` | which blast the Payload plays: the main one, or the alternative (its thump through the ground swaps with it); kept between sessions; also the wheel's BLAST SOUND row |
 | `/orbital nukesound main`, `/orbital nukesound alt` | which blast the Nuke plays: the main one, or the alternative (`blast_alt`, `blast_alt_far`); kept between sessions; also the wheel's BLAST SOUND row |
 | `/orbital impactframes kanada`, `/orbital impactframes blackflash`, `/orbital impactframes cinematic`, `/orbital impactframes off` | the Rod from God's impact frames (a fifth of a second of hard cuts as it strikes) in one of three looks, Kanada the default, or off (`on` brings back the last look); kept between sessions; also the wheel's IMPACT FX row (OFF, KANADA, BLACK FLASH, CINEMATIC), under the ring while the Rod is pointed at or loaded |
+| `/orbital quake tohoku`, `kobe`, `kanto`, `kumamoto`, `noto`, `valdivia` | which historic earthquake the Earthquake plays (`strike::QK_PRESETS`, `qk_preset` takes the key or the button's name); kept as `quake=` in the settings; also the wheel's QUAKE row while the Earthquake is pointed at or loaded |
 | `/orbital foldpattern a`, `b`, `c` | the Fold's crease pattern for its next strike: umbrella (the default), waterbomb or diagonal; kept, also the wheel's FOLD row |
 | `/orbital seed N`, `/orbital seed lock`, `/orbital seed random` | every strike's seed (what its random choices come from, so its look) held at N (1 to 997), held at the last strike's, or a fresh one each strike (the default); kept; also the wheel's SEED field (the last strike's seed, or one typed in it) and LOCK SEED switch, at the top of its left column |
 | `/orbital knockback on`, `/orbital knockback off` | the Nuke's, the Rod's, the Fold's, the Supervolcano's and the Carpet Bomb's knockback (`Act::Shove`), the Hurricane's carry and the Tsunami's surge on (the default) or off; kept; the camera's jolt stays either way; also the wheel's KNOCKBACK switch, in its left column under LOCK SEED while the Nuke, the Rod or the Hurricane is pointed at or loaded |
@@ -1221,3 +1222,108 @@ biggest, the bomber letting each go well before it strikes), `carpet_leaves_a_ro
 craters' depths, the last's size, the trench, the trees felled, the fires only on netherrack, nothing laid on the
 player), `carpet_spreads_each_craters_work_over_its_own_stages`, `carpet_reads_every_column_within_a_blasts_reach_and_no_more`,
 `carpet_leaves_the_land_alone_with_the_terrain_off`, `carpet_sounds_are_the_approved_ones_timed_by_distance`.
+
+## The Earthquake (laser 19)
+
+[`strike/quake.rs`](../mod/src/strike/quake.rs) the plan, the model and the land;
+[`shaders/earthquake.wgsl`](../mod/shaders/earthquake.wgsl) its pass. Pass 15, the wheel's fourth page, held back on the
+native version (`native_build::HELD_BACK`) until it has been played there. No beam and nothing from the sky: one of six
+historic earthquakes (`QK_PRESETS`, picked by the QUAKE row or `/orbital quake`, kept), on the land round the target.
+
+**The fault.** A line through the target, across the way to the player give or take 20 degrees (`QkGeo::new`: `st` along
+it, `nm` across it towards the player). A strike-slip fault (Kobe, Kumamoto) is vertical along it; a reverse fault (Noto)
+dips under the far side for `QK_DIP_W` (40 blocks seen from above); a megathrust (Tohoku, Kanto, Valdivia) lies under
+everything beyond it, out to the trench, so the target stands over its deep end and the "coast" is the line. Each
+preset's `half` is half its rupture's length in blocks, `hypo` where along it the rupture starts.
+
+**The Shindo scale.** Everything goes by the JMA's seismic intensity (`shindo_class`: 0, 1, 2, 3, 4, 5-, 5+, 6-, 6+, 7, by
+the instrumental intensity's half-steps, with the JMA's map colours). A place's intensity (`QkGeo::ii`) comes from its
+distance to the rupture: the distance over the land to the fault's plane seen from above (`rh`), shrunk to kilometres by
+the preset's `kpb` and set against its `depth` (`X = hypot(rh * kpb, depth)`), through Si and Midorikawa's (1999)
+attenuation of peak ground velocity (`lpgv`: `-log10(X + 0.0028 * 10^(0.5 Mw)) - 0.002 X`, magnitudes saturating at
+8.3) and Midorikawa et al.'s (1999) `I = 2.68 + 1.72 log PGV`, anchored so that right over the rupture it is the preset's
+`shindo` (every preset a 7 there; Kanto and Valdivia's estimated, as the scale had no 7 in 1923 and Chile has no
+Shindo). So with Kobe's `kpb` of 0.15, the Shindo falls to 6- some 100 blocks (15 km) off the fault and 5+ by 300;
+Tohoku's (0.55) is 6+ 150 blocks inland (80 km) and 5+ by 300. `quake_kobe_at_osaka_distance_is_about_five_or_six`
+holds the falloff to life.
+
+**What each class does** (`qk_chunk`, the JMA's table of what each class brings, as chances by the column's own
+intensity, `ramp`):
+
+| Shindo | Glass | Block walls | Wooden houses fall | Others fall | Roofs | Cracks a chunk | Slopes slide | Liquefies |
+|---|---|---|---|---|---|---|---|---|
+| 5- | 15% | | | | | | | |
+| 5+ | 35% | 30% | | | 20% | | | 30% |
+| 6- | 60% | 60% | 12% | | 50% | 0.35 | 25% | 60% |
+| 6+ | 85% | 85% | 45% | 10% | 80% | 1.1 | 60% | 75% |
+| 7 | all | all | 80% | 35% | all | 2.2 | 90% | 90% |
+
+(the slide and liquefaction chances times the preset's `slides` and `liquefy`). A house is a 6 by 6 cell of columns with
+two or more blocks people built on them (the Hurricane's block table, `hu_blocks.rs`, class 7), wooden if half its blocks
+are; its fate is the cell's, so a house falls whole. A fallen house is pancaked: its floors stacked onto its ground, a
+third of what stood, the glass, plants and light things gone; now and then one catches fire (`fires`, at most, a
+preset: Kanto's 48, its firestorm). Glass breaks block by block; a block wall (`_wall`) falls to its footing, a block of
+cobblestone by it. Cracks are lines across the chunk, mostly along the fault's strike, two to four deep in the middle,
+on bare ground only. A slope slides in 8 by 8 patches where a column stands three or more over its lowest neighbour:
+its top two to five blocks and what stands on them gone, the earth run down the slope (at most six columns) and heaped
+where it stops; `tidy` takes what that leaves hanging. Soft ground (sand, gravel, dirt, mud, clay) within six columns of
+water liquefies in 4 by 4 patches: sand boils and mud where nothing stands, a house sunk a block into mud where one does.
+What holds things or can't be broken (`hurricane::stays`) leaves its column alone.
+
+**The slip.** At the trace the land moves as it did (real size, a block a metre: Kobe's and Kumamoto's 2 blocks
+right-lateral and the far side up 1, Noto's far side up 4), dragged along with it within `QK_BAND` (12) each side and
+dying away towards the rupture's ends: each column takes the blocks of the column the slip brought there (`QkGeo::slip`;
+the chunk is read with `QK_M` columns round it for the sources), raised by its uplift. So a road, a river or a fence
+crossing the fault is offset. A strike-slip trace opens in an en-echelon fissure (segments of 7 blocks, three in four
+open, two to five deep) with mole tracks beside it; a reverse fault's scarp has its crest tumbled a block and the earth
+heaped at its foot. A megathrust breaks nothing on land.
+
+**The shaking** (`QkGeo::env`, `arrive`; mirrored by earthquake.wgsl's `qk_env`): real times sped up `QK_COMPRESS` (3)
+times, the waves' real speeds (`QK_VS` 3.5 km/s, `QK_VP` 6, the rupture's `QK_VR` 2.5) through `kpb`. At a place the
+P waves' rattle starts first (a fifth of the first pulse), then each of the preset's `pulses` (its subevents: Tohoku's
+two great packets, Kumamoto's foreshock and main shock, Kanto's great aftershock) arrives as the rupture front reaches
+the nearest part of a surface-breaking fault (`front`; a megathrust's pulses are its rupture's progress already) and the
+S waves travel on from there, each a quick rise and a long decay (`pulse`). The camera's jolts (`qk_second`, a stage a
+second, `Act::Soon`, from where the player is then) are `shake_of(I)` times that, every quarter second for a shallow
+fault and every 0.42 s in longer holds for a great one (Mw 8 and up), so it rolls rather than rattles.
+
+**The actionbar** (`qk_second`): for the presets that had an Earthquake Early Warning that day (Tohoku, Kumamoto, Noto:
+the JMA's from 2007) `EARTHQUAKE EARLY WARNING · strong shaking · SHINDO 6+ expected` from a second after it starts until
+the S waves reach the player, with a two-note tone; then `SHINDO 6+ · 6 Upper · TOHOKU 2011 Mw 9.1` in the JMA's colour
+for that class while it shakes (`(est.)` for an estimated one); for those that raised a tsunami, `MAJOR TSUNAMI WARNING`
+once it is over. The status panel says the preset, its top Shindo and, during the strike, the Shindo where the player
+stands now.
+
+**The tsunami.** Tohoku, Kanto, Noto and Valdivia raised one (`Quake::tsunami`). When such a strike ends on its own,
+lib.rs fires the Tsunami at the same target (`Strike::tsunami_after`, `fire_at`): its wave comes from beyond the target
+towards the player, which is the sea side of a megathrust here. `/orbital stop`, leaving the world or a stopped strike
+drops it. The Tsunami's pass is built as it fires, so the first time it can stall the game a moment.
+
+**Its sounds** are approved ones, nothing new: the P waves' `sinkhole.rumble`, each pulse's `supervolcano.tremor` with
+`sinkhole.rumble`, `skybreak.rumble` and `supervolcano.tremor` keeping the roar up through a long pulse and
+`supervolcano.seism` under the strong ones, all pitched down for the great quakes; `supervolcano.creak1-4` and
+`grind1-2` while it shakes hard where the player is; `sinkhole.crack1-3` every 20 blocks along the trace where and when
+it breaks; and, where they happen, `supervolcano.splinter1-3` for a house coming down, vanilla glass breaking,
+`supervolcano.rockfall1-3` for a slide, with dust (`campfire_cosy_smoke`, `poof`).
+
+**Its land's work** (terrain on): the chunks within `QK_REACH` (208) of the target where it shakes at 4.5 or more, or
+near the trace (`qk_chunks`, at most `QK_MAX_CHUNKS`, 640; about 530 for a strike on open land), force-loaded as it
+fires, read in parts of `QK_PART` (8) chunks (each 22 by 22 columns, `QK_BELOW` 40 under each top) three out at a time
+in the order the strong shaking reaches them, worked out a chunk at a time, `QK_STAGE` (5M fuel) a stage, and each
+chunk's changes (only the blocks that changed, set against what was read) go in as one edit at the moment the strong
+shaking reaches it (`strong_at`), or the trace breaks there. Chunks not loaded are asked again until 8 s before the end.
+The log says what it did: `earthquake [kobe]: N chunks changed, N columns of houses down, ...`.
+
+**Its pass** (earthquake.wgsl, no half-size stage): the land rolls, each point of it heaved up and down on the screen as
+the waves pass under it (a great quake's long swell, wavelength 90 and slow; a shallow one's 28 and quick), by the
+Shindo and the shaking there; dust is marched through a layer over the target's ground (24 steps): a low wall of it
+thrown up along a surface-breaking trace as the rupture runs past, settling over half a minute, and patches of it over
+the land that shook at 6- and over, from the houses and slopes that gave. The pass reads the fault's strike in
+`mod_params[1].z`, the player as it fired in `[3].xyz` and the preset in `[3].w`; keep its `qk_preset` and `qk_pulse`
+in step with `QK_PRESETS`. `tools/preview.py earthquake 5.5 9 22 --set quake=1` shows Kobe's (the preview's `quake=N`; views `qkplayer`, `qkhigh`, `qkalong`).
+
+Tests: `quake_tops_out_at_its_shindo_over_the_rupture_and_weakens_away`, `quake_shindo_classes_follow_the_jma_table`,
+`quake_kobe_at_osaka_distance_is_about_five_or_six`, `quake_waves_arrive_p_before_s_and_shake_most_in_the_main_pulse`,
+`quake_slip_jumps_across_the_trace_and_dies_out_of_the_band`, `quake_plan_is_in_order_and_ends_in_time`,
+`quake_chunk_work_damages_the_land_by_its_shindo`; `qk_print_table` (ignored) prints each preset's Shindo and arrivals
+by distance.

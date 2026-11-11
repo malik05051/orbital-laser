@@ -49,7 +49,7 @@ orbit. It digs a crater and a shaft to bedrock, flattens what stands round it an
 > [releases](https://github.com/Stink-O/horizon/releases). Either way you need your own copy of Minecraft Java
 > Edition 26.3: nothing from Minecraft is in this repository or the downloads.
 >
-> **Not in the native version yet: the Fold, the Sky Breaks and the Carpet Bomb.** They aren't playable in the native
+> **Not in the native version yet: the Fold, the Sky Breaks, the Carpet Bomb and the Earthquake.** They aren't playable in the native
 > file, `orbital.hnmod` (what the launcher's Mods page installs): there they show greyed out in the wheel, saying "On the
 > fork now, native soon". To play them now, use the fork version, `orbital-laser-v0.5.14.zip`, on the Orbital Laser
 > build of Horizon ([Getting started](#getting-started)). Every other laser plays on both.
@@ -79,7 +79,7 @@ launcher tells you the command if any are missing). Windows needs nothing extra.
 6. Hold the Designator and press **R** to pick a laser, then hold right-click on a target to fire. Type
    **`/orbital terrain off`** first if you don't want the land wrecked.
 
-**Not in this version yet:** the Fold, the Sky Breaks and the Carpet Bomb show greyed out in the native wheel. They're
+**Not in this version yet:** the Fold, the Sky Breaks, the Carpet Bomb and the Earthquake show greyed out in the native wheel. They're
 in the [fork version](#getting-started) for now.
 
 **To update:** when the **Mods** page offers a newer Orbital Laser, install it, then **Build** again (step 4).
@@ -104,7 +104,7 @@ Earlier versions: [docs/CHANGES.md](docs/CHANGES.md).
 
 ## The lasers
 
-Nineteen lasers, five to a page of the wheel.
+Twenty lasers, five to a page of the wheel.
 
 - **Plasma.** A raging beam with forked lightning. The crater fuses into glass, obsidian and magma, ringed in fire.
 - **Godly.** The clouds part and a pillar of light comes down. The crater turns to quartz and gold, with flowers.
@@ -231,9 +231,41 @@ Nineteen lasers, five to a page of the wheel.
   thirteen of them half a second apart; the last one's flash is brighter and lights the land round it, and a pale flash
   races across the land with its shockwave.
 
+- **The Earthquake** (page four, fork version only for now: greyed out in the native `orbital.hnmod`). No beam and
+  nothing from the sky: a historic earthquake, played on the land round the target, everything by the **JMA Shindo
+  scale** (0, 1, 2, 3, 4, 5-, 5+, 6-, 6+, 7). Pick one on the wheel's **QUAKE** row or with `/orbital quake`:
+
+  | Preset | Mw | Fault | Shindo at the fault | After it |
+  |---|---|---|---|---|
+  | **Tohoku 2011** | 9.1 | megathrust, offshore | 7 | the Tsunami |
+  | **Kobe 1995** (Great Hanshin) | 6.9 | strike-slip, under the city | 7 | fires |
+  | **Kanto 1923** (Great Kanto) | 7.9 | megathrust, under the bay | 7 (estimated) | fires, then the Tsunami |
+  | **Kumamoto 2016** | 7.0 | strike-slip, a Shindo 7 foreshock first | 7 | landslides |
+  | **Noto 2024** | 7.5 | reverse, the far side heaves up 4 m | 7 | fires, then the Tsunami |
+  | **Valdivia 1960** | 9.5, the strongest ever recorded | megathrust, offshore | 7 (estimated) | the Tsunami |
+
+  The Shindo at each place comes from its distance to the rupture (a published attenuation of ground motion, anchored
+  on the quake's own highest Shindo), and it decides everything there: how hard your view shakes, what the status
+  panel says ("Shindo here: 6+"), and what the land suffers, by the JMA's own table: glass breaks from 5-, block walls
+  fall from 5+, wooden houses lean and collapse from 6- (many at 6+, most at 7, pancaked to a third of their height,
+  some of them catching fire), sturdier buildings from 6+, the ground cracks and steep slopes slide from 6-, and soft
+  ground near water liquefies from 5+ (sand boils, houses sunk a block). The shaking comes as it does: the P waves'
+  rattle first, then the S waves' strong shaking in the quake's own pulses, arriving as the rupture front reaches the
+  nearest part of the fault; a great megathrust rolls in long, slow heaves for over a minute, a shallow fault jolts
+  hard for seconds. A strike-slip fault tears the land open along its trace as the rupture runs out along it: roads,
+  rivers and fences offset by its slip (real size, a block a metre), an en-echelon fissure, the ground rucked up beside
+  it; a reverse fault heaves the far side up in a scarp. Dust kicks up along the trace and over the wrecked land. For
+  the quakes that had one that day (Tohoku, Kumamoto, Noto) an **Earthquake Early Warning** shows over the hotbar before
+  the strong shaking reaches you, then the Shindo while it shakes; the quakes that raised a tsunami end on a **Major
+  Tsunami Warning**, and then **the Tsunami comes**: the real Tsunami laser, fired at the same target, the wave coming in
+  from beyond it (the sea side) towards you. `/orbital stop` during the quake stops the tsunami too. Real times are
+  sped up about three times and distances shrunk to fit: a strike runs 40 (Kobe) to 100 seconds (Valdivia), and the
+  land is changed out to about 200 blocks round the target. **Motion sensitivity:** the camera shakes for up to a
+  minute and a half, and the picture itself rolls with the land.
+
 Plasma, Godly, the Black Hole and the Meteor Storm reach 200 blocks; the Mothership, the Downfall, the Planet Killer, the
 Crystal Bloom, the Sinkhole, the Payload, the Nuke, the Rod from God, the Supercell, the Hurricane, the Tsunami, the Fold, the
-Supervolcano, the Sky Breaks and the Carpet Bomb reach 1000. [How it works](docs/HOW-IT-WORKS.md#the-lasers-in-detail) describes each one from start to finish.
+Supervolcano, the Sky Breaks, the Carpet Bomb and the Earthquake reach 1000. [How it works](docs/HOW-IT-WORKS.md#the-lasers-in-detail) describes each one from start to finish.
 
 | The laser wheel | Plasma | What Godly leaves behind |
 |---|---|---|
@@ -406,8 +438,8 @@ Mods), read the reason it gives first.
 3. **Fire.** Hold the designator, aim at a target and **hold right-click** for under a second. The action bar counts
    down (`ACQUIRING TARGET…`, `SEISMIC SCAN…` for the Sinkhole, `DESIGNATING…` for the Payload, the Nuke and the Rod,
    `TRACKING STORM…` for the Hurricane, `READING THE SEA…` for the Tsunami, `ATTUNING…` for the Fold, `BREACHING CRUST…` for the
-   Supervolcano, `STRAINING THE SKY…` for the Sky Breaks, `CLEARING THE RUN…` for the Carpet Bomb), then the strike lands where your crosshair is. Nothing else pops up over the
-   hotbar but `NO TARGET IN RANGE`.
+   Supervolcano, `STRAINING THE SKY…` for the Sky Breaks, `CLEARING THE RUN…` for the Carpet Bomb, `READING THE FAULT…` for the Earthquake), then the strike lands where your crosshair is. Nothing else pops up over the
+   hotbar but `NO TARGET IN RANGE`, and the Earthquake's warnings and Shindo.
 4. **Caught in the Tsunami?** The water takes you once it is over your head, tumbles you along with it, hauls you to the
    surface after about six seconds, and carries you back as it falls, to be set down near where it took you, facing the
    way it went. Hold **sneak** for half a second to break free. `/orbital knockback off` leaves you standing in it, the picture still drowned.
@@ -418,7 +450,9 @@ Mods), read the reason it gives first.
 
 Only one strike runs at a time. Plasma, Godly and the Black Hole take about 26 seconds, the Planet Killer 30.5, the
 Mothership 34, the Carpet Bomb 37.5, the Meteor Storm 38, the Sinkhole 40, the Supercell and the Tsunami 42, the Sky Breaks 49.5, the Crystal Bloom and the Rod from God 60,
-the Downfall, the Hurricane and the Fold 64, the Payload 70, the Supervolcano 88 and the Nuke 90.
+the Downfall, the Hurricane and the Fold 64, the Payload 70, the Supervolcano 88 and the Nuke 90. The Earthquake runs as
+long as its preset: Kobe 40, Kumamoto 46, Noto 48, Kanto 62, Tohoku 80 and Valdivia 100, and those that raise a
+tsunami are followed by the Tsunami's 42.
 
 The wheel also has:
 
@@ -437,6 +471,8 @@ The wheel also has:
   and **FOLLOW** (the Nuke and the Payload), the follow camera.
 - An **IMPACT FX** row under the ring while the Rod from God is pointed at or loaded: **OFF**, **KANADA** (the
   default), **BLACK FLASH** or **CINEMATIC**, as `/orbital impactframes`.
+- A **QUAKE** row while the Earthquake is pointed at or loaded: **TOHOKU** (the default), **KOBE**, **KANTO**,
+  **KUMAMOTO**, **NOTO** or **VALDIVIA**, as `/orbital quake`.
 - A **FOLD** row while the Fold is pointed at or loaded: its crease pattern, **UMBRELLA** (the default), **WATERBOMB** or **DIAGONAL**, as `/orbital foldpattern`.
 - For the Mothership and the Downfall, rows for where the ship comes in from, how it arrives, and its colour.
 - For the Payload, a **BLAST SOUND** row: **MAIN** (deep and rolling) or **ALT** (a sharp crack and a wide roar), the
@@ -447,7 +483,8 @@ The wheel also has:
 |---|---|
 | `/orbital give` | gives you the Designator |
 | `/orbital wheel` | opens the laser wheel |
-| `/orbital plasma`, `godly`, `blackhole`, `meteor`, `mothership`, `downfall`, `planetkiller`, `crystalbloom`, `sinkhole`, `payload`, `nuke`, `rod`, `supercell`, `hurricane`, `tsunami`, `fold`, `supervolcano`, `skybreak`, `carpetbomb` | loads that laser |
+| `/orbital plasma`, `godly`, `blackhole`, `meteor`, `mothership`, `downfall`, `planetkiller`, `crystalbloom`, `sinkhole`, `payload`, `nuke`, `rod`, `supercell`, `hurricane`, `tsunami`, `fold`, `supervolcano`, `skybreak`, `carpetbomb`, `earthquake` | loads that laser |
+| `/orbital quake tohoku\|kobe\|kanto\|kumamoto\|noto\|valdivia` | which historic earthquake the Earthquake plays; kept; also the wheel's QUAKE row |
 | `/orbital terrain on\|off` | terrain damage on, or off (light and sound only) |
 | `/orbital approach ahead\|behind\|left\|right\|overhead` | where the ship comes in from |
 | `/orbital arrival snap\|unfold\|warp` | how the ship arrives |
@@ -487,7 +524,7 @@ Orbital Laser → Settings**).
   and rebind it (on a native build, on **Options → Mods → Orbital Laser → Settings**). R only opens the wheel while you play with the designator in hand, not over another screen. With
   anything else in hand it does nothing (`/orbital wheel` opens the wheel either way).
 - **`NO TARGET IN RANGE`.** You're aiming at the sky, too far, or at unloaded chunks. Past your render distance only
-  the Mothership, the Downfall, the Planet Killer, the Crystal Bloom, the Sinkhole, the Payload, the Nuke, the Rod, the Supercell, the Hurricane, the Tsunami, the Fold, the Supervolcano, the Sky Breaks and the Carpet Bomb can aim, and only with
+  the Mothership, the Downfall, the Planet Killer, the Crystal Bloom, the Sinkhole, the Payload, the Nuke, the Rod, the Supercell, the Hurricane, the Tsunami, the Fold, the Supervolcano, the Sky Breaks, the Carpet Bomb and the Earthquake can aim, and only with
   **LOD Distance** on in Video Settings.
 - **The designator only clicks.** A strike is already under way, and one runs at a time. Wait for it to finish, or end
   it with the wheel's STOP STRIKE or `/orbital stop`.
@@ -515,7 +552,10 @@ Orbital Laser → Settings**).
 - **Single player** (or hosting LAN). The world changes need a world the game itself runs, and the effects are drawn
   only for the player who fired.
 - **Terrain damage can't be undone.** Back up the world, or switch terrain damage off.
-- **Targets must be in loaded chunks.** The fifteen long-range lasers reach 1000 blocks across the distant terrain, where
+- **The Earthquake's tsunami may stall the game for a moment as it starts** the first time, on the fork version, while
+  the Tsunami's effects are built (the game holds one post pass at a time). The Shindo where you stand is worked out
+  each second from where you are, but the land's damage is fixed as the strike fires.
+- **Targets must be in loaded chunks.** The sixteen long-range lasers reach 1000 blocks across the distant terrain, where
   the aim follows the coarser distant heights, and a crater only shows there once those chunks load.
 
 To build the mod from source or change it, see [CONTRIBUTING.md](CONTRIBUTING.md).
