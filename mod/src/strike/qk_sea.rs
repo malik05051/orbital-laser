@@ -411,6 +411,28 @@ thread_local! {
 pub fn set_pending(h: HandOff) {
     PENDING.with(|p| *p.borrow_mut() = Some(h));
 }
+/// The hand-over waiting, changed (the run-up worked out as the quake ends).
+pub fn with_pending(f: impl FnOnce(&mut HandOff)) {
+    PENDING.with(|p| {
+        if let Some(h) = p.borrow_mut().as_mut() {
+            f(h);
+        }
+    });
+}
+/// How many times its height at the coast a tsunami may run up the land at most.
+pub const QT_RUNUP: f64 = 3.0;
+/// The Tsunami's size (`TsGeo::k`) for a wave of size `k0` that runs up to the player's ground (`ground`, the first air
+/// over it) a couple of blocks deep as it holds there: `k0` if that is enough, up to `QT_RUNUP` times it.
+pub fn run_up_k(ts: &super::tsunami::TsGeo, ground: f64, k0: f64) -> f64 {
+    use super::tsunami::{TS_A, TS_LOW, TS_SEA};
+    // (the level the water holds at the player's place, over the target's ground, at the Tsunami's own size)
+    let hold = TS_A * ts.env(ts.dp, 0.0) * (1.0 - TS_LOW) - TS_SEA;
+    if hold <= 1.0 {
+        return k0;
+    }
+    let want = (ground - ts.t[1] + 2.0) / hold;
+    want.clamp(k0, (QT_RUNUP * k0).min(1.0))
+}
 pub fn take_pending() -> Option<HandOff> {
     PENDING.with(|p| p.borrow_mut().take())
 }
@@ -474,9 +496,7 @@ pub fn eew_alert(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], t: f64,
         let d = (x - me[0]).hypot(z - me[2]);
         let far = if d > 140.0 { "_far" } else { "" };
         let late = super::mh(k as u32, seed, 0x5a2) * 1.5 + d / 343.0;
-        for r in 0..2 {
-            p.ev.push(((t + late + 2.8 * f64::from(r)) as f32, Act::Sound { event: format!("orbital:quake.eew{far}"), at: Some([x, y + 9.0, z]), volume: 16.0 * vol, pitch: 1.0 }));
-        }
+        p.ev.push(((t + late) as f32, Act::Sound { event: format!("orbital:quake.eew{far}"), at: Some([x, y + 9.0, z]), volume: 16.0 * vol, pitch: 1.0 }));
     }
 }
 

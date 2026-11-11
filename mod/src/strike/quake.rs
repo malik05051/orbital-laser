@@ -130,7 +130,7 @@ pub const QK_PRESETS: [Quake; 6] = [
         pulses: &[(0.0, 0.45, 13.0), (18.0, 1.0, 18.0), (36.0, 0.6, 14.0), (62.0, 0.22, 5.0)],
         tsunami: Some(Tsu {
             expect: "10 m+",
-            draw: 3.0,
+            draw: 7.0,
             // (a first rise, the great second wave the coast saw half an hour on, a third)
             waves: &[(0.0, 3.5, 10.0, 3.0, 12.0), (26.0, 12.0, 14.0, 6.0, 20.0), (68.0, 6.0, 10.0, 4.0, 14.0)],
             speed: 12.0,
@@ -189,7 +189,7 @@ pub const QK_PRESETS: [Quake; 6] = [
         pulses: &[(0.0, 0.8, 11.0), (9.0, 1.0, 13.0), (34.0, 0.55, 7.0)],
         tsunami: Some(Tsu {
             expect: "10 m",
-            draw: 2.0,
+            draw: 5.0,
             // (Atami's 12 m came within minutes, the bay's waves after it)
             waves: &[(0.0, 6.0, 8.0, 3.0, 12.0), (24.0, 8.0, 10.0, 4.0, 14.0), (56.0, 3.0, 8.0, 2.0, 10.0)],
             speed: 10.0,
@@ -247,7 +247,7 @@ pub const QK_PRESETS: [Quake; 6] = [
         pulses: &[(0.0, 0.7, 6.0), (6.0, 1.0, 14.0), (36.0, 0.2, 4.0)],
         tsunami: Some(Tsu {
             expect: "5 m",
-            draw: 1.0,
+            draw: 3.0,
             // (Suzu's 4 to 5 m, the first wave within minutes)
             waves: &[(0.0, 3.0, 7.0, 3.0, 10.0), (20.0, 4.5, 8.0, 3.0, 12.0), (44.0, 2.0, 6.0, 2.0, 8.0)],
             speed: 9.0,
@@ -280,7 +280,7 @@ pub const QK_PRESETS: [Quake; 6] = [
         pulses: &[(0.0, 0.6, 18.0), (14.0, 0.9, 20.0), (34.0, 1.0, 20.0), (54.0, 0.6, 15.0), (74.0, 0.2, 5.0)],
         tsunami: Some(Tsu {
             expect: "10 m+",
-            draw: 4.0,
+            draw: 8.0,
             waves: &[(0.0, 4.0, 12.0, 4.0, 14.0), (30.0, 10.0, 14.0, 6.0, 20.0), (72.0, 7.0, 12.0, 4.0, 16.0)],
             speed: 11.0,
             reach: 220.0,
@@ -344,6 +344,12 @@ const QK_STAGE: u64 = 5_000_000;
 /// The shaking's strength on the game's camera (0 to 1, which the game squares) for instrumental intensity `i`.
 pub fn shake_of(i: f64) -> f64 {
     ((i - 2.5) / 4.5).clamp(0.0, 1.0)
+}
+/// How violent it is at instrumental intensity `i`, past `shake_of`: the JMA's 6+ and 7 aren't a little more than a 6-
+/// (from 6+ no one can stand or move but by crawling, at 7 people and furniture are thrown), so the picture's sway and
+/// the camera's jolts grow steeply over them, to 2.6 times at 7 (earthquake.wgsl's qk_violence: keep in step).
+pub fn qk_violence(i: f64) -> f64 {
+    shake_of(i) * (1.0 + 1.6 * smooth(5.5, 7.0, i))
 }
 
 /// Peak ground velocity's log at `x` km from the rupture (Si and Midorikawa 1999, less the magnitude's own terms, which
@@ -826,7 +832,7 @@ fn qk_chunk(w: &mut Work, cur: &Cur, k: usize, q: &mut Plan) -> bool {
 
     // ground cracks: a few lines across the chunk, mostly along the fault's strike, more the harder it shook
     let mut crack = [0u8; 256];
-    let rate = ramp(&[(5.5, 0.0), (6.0, 0.2), (6.5, 0.6), (7.0, 1.2)], ic);
+    let rate = ramp(&[(5.5, 0.0), (6.0, 0.2), (6.5, 0.8), (7.0, 1.6)], ic);
     let ncr = (rate + chance(cx, cz, seed, 1)).floor() as i32;
     for c in 0..ncr.max(0) as u32 {
         let (mut px, mut pz) = (chance(cx, cz, seed, 10 + c) * 16.0, chance(cx, cz, seed, 20 + c) * 16.0);
@@ -948,7 +954,7 @@ fn qk_chunk(w: &mut Work, cur: &Cur, k: usize, q: &mut Plan) -> bool {
             let built = (g + 1..=hi).filter(|&y| cur.pal(col[at(y)]).class == 7).count();
             let house = built >= 2;
             let wooden = wood * 2 >= built.max(1);
-            let p_fall = if wooden { ramp(&[(5.5, 0.0), (6.0, 0.12), (6.5, 0.45), (7.0, 0.8)], ii) } else { ramp(&[(6.0, 0.0), (6.5, 0.1), (7.0, 0.35)], ii) };
+            let p_fall = if wooden { ramp(&[(5.5, 0.0), (6.0, 0.15), (6.5, 0.6), (6.8, 0.85), (7.0, 0.95)], ii) } else { ramp(&[(6.0, 0.0), (6.5, 0.25), (6.8, 0.45), (7.0, 0.6)], ii) };
             let p_roof = ramp(&[(5.0, 0.0), (5.5, 0.2), (6.0, 0.5), (6.5, 0.8), (7.0, 1.0)], ii);
             let p_glass = ramp(&[(4.5, 0.0), (5.0, 0.15), (5.5, 0.35), (6.0, 0.6), (6.5, 0.85), (7.0, 1.0)], ii);
             let p_wall = ramp(&[(5.0, 0.0), (5.5, 0.3), (6.0, 0.6), (6.5, 0.85), (7.0, 1.0)], ii);
@@ -1354,27 +1360,102 @@ fn bar(text: &str, rgb: u32) -> String {
     format!(r##"title @s actionbar {{"text":"{text}","color":"#{rgb:06X}"}}"##)
 }
 
-/// A second of the shaking where the player is now: the jolts, and the actionbar's Shindo.
-fn qk_second(q: &mut Plan, geo: Rc<QkGeo>, t0: f32, me0: [f64; 3], sea: Option<qk_sea::SeaTime>) {
+/// An aftershock: when it sets out (strike seconds; the waves reach a place `QkGeo::arrive` later), its magnitude, how
+/// much weaker its shaking is than the main shock's anywhere (Shindo), and how long it shakes (strike seconds).
+#[derive(Clone, Copy, Debug)]
+pub struct After {
+    pub t: f64,
+    pub mw: f64,
+    pub drop: f64,
+    pub dur: f64,
+}
+/// Most aftershocks the pass's table holds.
+pub const QK_AFTER_MAX: usize = 16;
+
+/// The aftershocks, from when the main shock's strong shaking is over to the strike's end `len`: as many as its size
+/// brings, their times by Omori's law (the rate falling as 1 / (t + c), so most come early), their magnitudes by
+/// Gutenberg and Richter's (b = 1, from 3 under the main shock), the largest about 1.2 under it (Båth's law) and among
+/// the first few. Each one's Shindo anywhere is the main shock's less what its smaller size takes (the intensity's own
+/// 1.1 a magnitude, both saturating past 8.3 as `lpgv` has it), give or take where along the fault it broke.
+pub fn qk_aftershocks(q: &Quake, seed: u32, len: f64) -> Vec<After> {
+    let t0 = f64::from(QK_T0) + q.pulses.iter().filter(|p| p.1 >= 0.4).map(|p| f64::from(p.0 + p.2)).fold(0.0, f64::max) + 3.0;
+    let span = len - 4.0 - t0;
+    if span < 4.0 || q.mw < 5.5 {
+        return Vec::new();
+    }
+    // (a shallow M7 a handful in the strike's compressed time, a great M9 a dozen and more)
+    let n = (((q.mw - 5.5) * 3.2) * (span / 40.0).clamp(0.6, 1.6)).round().clamp(2.0, QK_AFTER_MAX as f64) as usize;
+    let h = |k: u32| mh(k, seed, 0xaf7e);
+    let c = 3.0;
+    let mut out: Vec<After> = (0..n as u32)
+        .map(|k| {
+            let t = t0 + c * ((1.0 + span / c).powf(h(k)) - 1.0);
+            let mw = (q.mw - 3.0 - (1.0 - h(100 + k)).max(1e-6).log10()).min(q.mw - 1.0);
+            After { t, mw, drop: 0.0, dur: 0.0 }
+        })
+        .collect();
+    out.sort_by(|a, b| a.t.total_cmp(&b.t));
+    // (the largest: Båth's 1.2 under the main shock, one of the first three)
+    let big = (h(200) * 3.0) as usize % out.len().min(3);
+    out[big].mw = q.mw - 1.2 + (h(201) - 0.5) * 0.4;
+    for (k, a) in out.iter_mut().enumerate() {
+        let m = |x: f64| x.min(8.3);
+        a.drop = (1.1 * (m(q.mw) - m(a.mw)) + (h(300 + k as u32) - 0.35) * 0.6).max(0.1);
+        a.dur = (1.5 + (a.mw - 5.0) * 1.8).clamp(1.5, 10.0);
+    }
+    out
+}
+/// How hard aftershock `a` shakes at (u, d) at strike second `t`, 0 to 1 (times `shake_of` its Shindo there).
+fn after_env(a: &After, s_arr: f64, t: f64) -> f64 {
+    pulse((t - a.t - s_arr) / a.dur)
+}
+
+/// A second of the shaking where the player is now: the jolts, being thrown about at 6+ and 7 (the knockback's switch),
+/// and the actionbar's Shindo.
+#[allow(clippy::too_many_arguments)]
+fn qk_second(q: &mut Plan, geo: Rc<QkGeo>, t0: f32, me0: [f64; 3], sea: Option<qk_sea::SeaTime>, afters: Rc<Vec<After>>) {
     let me = crate::sdk::game::get_player().map_or(me0, |p| [p.x, p.y, p.z]);
     let quake = geo.q;
     let (u, d) = geo.ud(me[0], me[2]);
     let ii = geo.ii_ud(u, d);
-    let s = shake_of(ii);
     let (cls, words, rgb) = shindo_class(ii);
     let (arr_s, arr_p) = geo.arrive(u, d);
     let tp = f64::from(QK_T0) + arr_p;
     let ts = f64::from(QK_T0) + arr_s;
-    // (the long rolling of a great quake in slower, longer heaves; a shallow one's in quick jolts)
+    // (the long rolling of a great quake in slower, longer heaves; a shallow one's in quick jolts; quicker still at 6+
+    // and 7, where it throws things about)
     let (step, hold) = if quake.mw >= 8.0 { (0.42, 0.85) } else { (0.26, 0.5) };
+    let step = step * (1.0 - 0.4 * smooth(5.8, 6.8, ii));
+    // the main shock's shaking, and each aftershock's at its own (weaker) Shindo here
+    let felt = |t: f64| -> (f64, f64) {
+        let mut best = (geo.env(u, d, t), ii);
+        for a in afters.iter() {
+            let ia = ii - a.drop;
+            let e = after_env(a, arr_s, t);
+            if e * qk_violence(ia) > best.0 * qk_violence(best.1) {
+                best = (e, ia);
+            }
+        }
+        best
+    };
     let mut t = f64::from(t0) + (q.rng.next() * step);
     let mut peak = 0.0f64;
+    let mut thrown = false;
     while t < f64::from(t0) + 1.0 {
-        let e = geo.env(u, d, t);
+        let (e, i_now) = felt(t);
+        let v = qk_violence(i_now);
         peak = peak.max(e);
-        if e > 0.015 && s > 0.0 {
+        if e > 0.015 && v > 0.0 {
             let (j, h) = (q.rng.uniform(0.7, 1.15), q.rng.uniform(0.8, 1.2));
-            q.shake(t as f32, (0.75 * s * e * j) as f32, (hold * h) as f32);
+            q.shake(t as f32, (0.75 * v * e * j).min(1.0) as f32, (hold * h) as f32);
+            // (from 6+ no one stays on their feet: knocked a step or two any way, at 7 off the ground)
+            let hard = smooth(5.8, 7.0, i_now) * e;
+            if !thrown && hard > 0.25 && q.rng.next() < 0.7 {
+                thrown = true;
+                let a = q.rng.next() * 2.0 * PI;
+                let from = [me[0] - a.cos(), me[1], me[2] - a.sin()];
+                q.ev.push((t as f32, Act::Shove { from, out: (0.42 * hard * q.rng.uniform(0.6, 1.1)) as f32, up: (0.32 * hard * smooth(6.3, 7.0, i_now) * q.rng.uniform(0.6, 1.1)) as f32, reach: 8.0 }));
+            }
         }
         t += step * q.rng.uniform(0.75, 1.25);
     }
@@ -1389,21 +1470,29 @@ fn qk_second(q: &mut Plan, geo: Rc<QkGeo>, t0: f32, me0: [f64; 3], sea: Option<q
         let w = if words == cls { String::new() } else { format!(" ({words})") };
         bar(&format!("SHINDO {cls}{w}{est}  ·  {title}"), rgb)
     };
+    // (the JMA's warning and its countdown, nothing else: the sea drawing back is seen, not announced)
     let tsunami = quake.tsunami.as_ref().zip(sea).filter(|(_, st)| tf >= st.warn - 0.01 && tf < st.end).map(|(tsu, st)| {
         let (kind, col) = qk_sea::warning(tsu);
-        let s = qk_sea::sea_s(tsu, &st, tf);
-        if tf < st.draw {
-            bar(&format!("{kind}  ·  {}  ·  wave in {}", tsu.expect, qk_sea::mmss(st.arrive - tf)), col)
-        } else if tf < st.arrive {
-            bar(&format!("SEA WITHDRAWING  ·  {s:+.1} m  ·  wave in {}", qk_sea::mmss(st.arrive - tf)), col)
-        } else if tf < st.end - 12.0 {
-            bar(&format!("TSUNAMI  ·  {s:+.1} m  ·  max {:.1} m", qk_sea::observed_max(tsu, &st, tf)), col)
-        } else {
-            bar(&format!("TSUNAMI  ·  max {:.1} m  ·  stay on high ground", qk_sea::observed_max(tsu, &st, tf)), col)
+        bar(&format!("{kind}  ·  {}  ·  wave in {}", tsu.expect, qk_sea::mmss(st.arrive - tf)), col)
+    });
+    // an aftershock shaking here now (felt from Shindo 1), with its warning first if it is strong
+    let after = afters.iter().find_map(|a| {
+        let ia = ii - a.drop;
+        let (s0, s1) = (a.t + arr_s, a.t + arr_s + a.dur * 0.9);
+        if ia < 0.5 || tf + 1.0 < a.t + arr_p || tf > s1 {
+            return None;
         }
+        let (c, _, rgb) = shindo_class(ia);
+        Some(if quake.eew && ia >= 4.5 && tf + 1.0 < s0 {
+            bar(&format!("EARTHQUAKE EARLY WARNING  ·  SHINDO {c}"), 0xFF2800)
+        } else {
+            bar(&format!("AFTERSHOCK  ·  SHINDO {c}  ·  M{:.1}", a.mw), rgb)
+        })
     });
     let line = if quake.eew && tf >= f64::from(QK_T0) + 1.0 && tf < ts && ii >= 3.5 {
         Some(bar(&format!("EARTHQUAKE EARLY WARNING  ·  SHINDO {cls}"), 0xFF2800))
+    } else if let Some(a) = after.filter(|_| !shaking || peak < 0.2) {
+        Some(a)
     } else if shaking && (tsunami.is_none() || (t0 as i32) % 3 != 2) {
         // (while it still shakes after the tsunami warning went out, the two take turns)
         Some(shindo())
@@ -1415,9 +1504,10 @@ fn qk_second(q: &mut Plan, geo: Rc<QkGeo>, t0: f32, me0: [f64; 3], sea: Option<q
     }
 }
 
-/// The sounds where the player stands: the P waves' rumble, each subevent's roar through the ground, the creak of
-/// timber while it shakes hard; the rupture's cracks along the trace where it breaks.
-fn qk_sounds(p: &mut Plan, geo: &QkGeo, me: [f64; 3]) {
+/// The sounds where the player stands: the Earthquake Early Warning's chime (`quake.eew`) as a phone and a television
+/// sound it, the P waves' rumble, each subevent's roar through the ground, the creak of timber while it shakes hard;
+/// the rupture's cracks along the trace where it breaks; each aftershock's rumble, the strong ones warned of again.
+fn qk_sounds(p: &mut Plan, geo: &QkGeo, me: [f64; 3], afters: &[After], poles: &[[f64; 2]], siren: f32) {
     let quake = geo.q;
     let (u, d) = geo.ud(me[0], me[2]);
     let ii = geo.ii_ud(u, d);
@@ -1428,11 +1518,30 @@ fn qk_sounds(p: &mut Plan, geo: &QkGeo, me: [f64; 3]) {
     // (the P waves: a deep rumble like a train coming)
     p.ev.push(((t0 + pw) as f32, Act::Sound { event: "orbital:sinkhole.rumble".into(), at: None, volume: 0.45 * loud, pitch: deep }));
     if quake.eew {
-        // (the warning's tone, as a phone's: two notes, three times)
-        for k in 0..3 {
-            let t = (t0 + 1.0 + 0.5 * f64::from(k)) as f32;
-            p.sound(t, "block.note_block.bell", 6.0, 1.26);
-            p.sound(t + 0.2, "block.note_block.bell", 6.0, 0.94);
+        p.ev.push(((t0 + 1.0) as f32, Act::Sound { event: "orbital:quake.eew".into(), at: None, volume: 0.85, pitch: 1.0 }));
+    }
+    // the aftershocks
+    for a in afters {
+        let ia = ii - a.drop;
+        if ia < 0.5 {
+            continue;
+        }
+        let l = ((ia - 1.0) / 5.5).clamp(0.06, 1.0) as f32;
+        let pitch = (1.05 - (a.mw - 6.8) * 0.1).clamp(0.72, 1.1) as f32;
+        if quake.eew && ia >= 4.5 {
+            p.ev.push(((a.t + 0.6) as f32, Act::Sound { event: "orbital:quake.eew".into(), at: None, volume: 0.85, pitch: 1.0 }));
+            if ia >= 5.0 {
+                qk_sea::eew_alert(p, poles, geo.t[1], me, a.t + 0.8, siren, geo.seed ^ (a.t as u32));
+            }
+        }
+        p.ev.push(((a.t + pw) as f32, Act::Sound { event: "orbital:sinkhole.rumble".into(), at: None, volume: 0.4 * l, pitch }));
+        p.ev.push(((a.t + s) as f32, Act::Sound { event: "orbital:supervolcano.tremor".into(), at: None, volume: (0.9 * l).min(1.0), pitch }));
+        if ia >= 5.0 {
+            p.ev.push(((a.t + s + 0.1) as f32, Act::Sound { event: "orbital:supervolcano.seism".into(), at: None, volume: (0.5 * l).min(1.0), pitch }));
+        }
+        if ia >= 4.0 {
+            let k = 1 + (p.rng.next() * 4.0) as u32 % 4;
+            p.ev.push(((a.t + s + 0.4) as f32, Act::Sound { event: format!("orbital:supervolcano.creak{k}"), at: None, volume: (0.45 * l).min(1.0), pitch: 0.9 }));
         }
     }
     for (k, &(tk, a, dur)) in quake.pulses.iter().enumerate() {
@@ -1483,7 +1592,7 @@ fn qk_sounds(p: &mut Plan, geo: &QkGeo, me: [f64; 3]) {
 }
 
 /// The tsunami's warnings and sounds where the player is, until the quake hands over to the Tsunami: the JMA's warning
-/// as a title as it goes out and as the sea draws back, NHK's alert tone (`quake.nhk_alert`, the player's own
+/// as a title as it goes out (only then: the sea drawing back is seen, not announced), NHK's alert tone (`quake.nhk_alert`, the player's own
 /// recording, git-ignored: none without it) with a soft chime, the coast's sirens from the poles (`qk_sea::sirens`), the
 /// sea's hiss as it withdraws.
 #[allow(clippy::too_many_arguments)]
@@ -1498,10 +1607,8 @@ fn qk_sea_warnings(p: &mut Plan, geo: &QkGeo, tsu: &qk_sea::Tsu, st: &qk_sea::Se
     // (a title is drawn four times the size: its line short, the rest in the subtitle under it)
     let major = if kind.starts_with("MAJOR") { "Major warning" } else { "Warning" };
     title(p, st.warn, "TSUNAMI", &format!("{major}  ·  {}  ·  get to high ground", tsu.expect), col);
-    title(p, st.draw + 1.0, "SEA WITHDRAWING", "The wave is coming  ·  get to high ground", col);
     let alert = |p: &mut Plan, t: f64, vol: f32| p.ev.push((t as f32, Act::Sound { event: "orbital:quake.nhk_alert".into(), at: None, volume: vol, pitch: 1.0 }));
     alert(p, st.warn, 0.9);
-    alert(p, st.draw + 1.0, 0.8);
     for (n, pitch) in [1.5, 1.26, 1.0].into_iter().enumerate() {
         p.sound((st.warn + 0.22 * n as f64) as f32, "block.note_block.chime", 3.0, pitch);
     }
@@ -1510,6 +1617,27 @@ fn qk_sea_warnings(p: &mut Plan, geo: &QkGeo, tsu: &qk_sea::Tsu, st: &qk_sea::Se
     let (_, d) = geo.ud(me[0], me[2]);
     let near = (1.0 - d.max(0.0) / (1.5 * tsu.reach)).clamp(0.15, 1.0) as f32;
     p.ev.push((st.draw as f32, Act::Sound { event: "orbital:tsunami.rumble_after".into(), at: None, volume: 0.35 * near, pitch: 0.8 }));
+}
+
+/// Where the pass's table puts the aftershocks (a count, then each one's start, Shindo drop and length) and the sea's
+/// drawing back (its start, the first wave's arrival, how far down, how fast it runs, the hand-over); earthquake.wgsl's
+/// `QK_TAB_*`: keep in step.
+pub const QK_TAB_AFTER: usize = 0;
+pub const QK_TAB_SEA: usize = 52;
+fn qk_table(q: &Quake, afters: &[After], sea: Option<qk_sea::SeaTime>) -> Vec<u32> {
+    let mut w = vec![0f32; QK_TAB_SEA + 6];
+    let n = afters.len().min(QK_AFTER_MAX);
+    w[QK_TAB_AFTER] = n as f32;
+    for (k, a) in afters.iter().take(n).enumerate() {
+        let i = QK_TAB_AFTER + 1 + 3 * k;
+        w[i] = a.t as f32;
+        w[i + 1] = a.drop as f32;
+        w[i + 2] = a.dur as f32;
+    }
+    if let (Some(ts), Some(st)) = (q.tsunami.as_ref(), sea) {
+        w[QK_TAB_SEA..QK_TAB_SEA + 6].copy_from_slice(&[st.draw as f32, st.arrive as f32, ts.draw as f32, ts.speed as f32, st.end as f32, qk_sea::SEA as f32]);
+    }
+    w.iter().map(|f| f.to_bits()).collect()
 }
 
 /// What the player has set for the next Earthquake (lib.rs's `fire_at`, through `qk_configure`): the tsunami's
@@ -1586,7 +1714,7 @@ pub fn qk_set_custom(mw: f64, depth: f64, shindo: Option<f64>) -> &'static Quake
         };
         let hf = h as f32;
         let waves: &'static [(f32, f32, f32, f32, f32)] = Box::leak(vec![(0.0, 0.35 * hf, 10.0, 3.0, 12.0), (26.0, hf, 14.0, 6.0, 20.0), (64.0, 0.55 * hf, 10.0, 4.0, 14.0)].into_boxed_slice());
-        Tsu { expect, draw: 0.25 * h, waves, speed: 11.0, reach: (20.0 * h).clamp(60.0, 260.0) }
+        Tsu { expect, draw: (0.6 * h).clamp(1.0, 8.0), waves, speed: 11.0, reach: (20.0 * h).clamp(60.0, 260.0) }
     });
     let name: &'static str = Box::leak(format!("Custom M{mw:.1}").into_boxed_str());
     let date: &'static str = Box::leak(format!("{depth:.0} km deep").into_boxed_str());
@@ -1651,18 +1779,22 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
     let sea = qk_sea::sea_time(quake, countdown);
     let len = qk_sea::qk_length(quake, countdown);
 
+    let afters = Rc::new(qk_aftershocks(quake, geo.seed, f64::from(len)));
     // the shaking where the player is, worked out a second at a time from where they are then
     let mut t = 0.0f32;
     while t < len {
         let g = geo.clone();
+        let a = afters.clone();
         let t0 = t;
-        p.soon(t0, move |q| qk_second(q, g, t0, me, sea));
+        p.soon(t0, move |q| qk_second(q, g, t0, me, sea, a));
         t += 1.0;
     }
-    qk_sounds(&mut p, &geo, me);
+    let poles = qk_sea::siren_sites(&geo, me);
+    qk_sounds(&mut p, &geo, me, &afters, &poles, cfg.siren);
+    // what the pass reads: the aftershocks (its sway) and the sea drawing back (its wet bed)
+    p.ev.push((0.0, Act::Table(qk_table(quake, &afters, sea))));
     // the coast's siren poles (built with the terrain on; heard either way), its earthquake alert from them as the warning
     // goes out, and with a tsunami its warnings and sirens
-    let poles = qk_sea::siren_sites(&geo, me);
     if terrain {
         for (k, [x, z]) in poles.iter().enumerate() {
             p.ev.push((0.5 + 0.05 * k as f32, Act::Blocks(Box::new(qk_sea::siren_pole(x.floor() as i32, z.floor() as i32)))));
@@ -1729,7 +1861,25 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
     // the hand-over to the Tsunami (lib.rs fires it at the same target as this strike ends on its own)
     if let Some(tsu) = quake.tsunami.as_ref() {
         let (kind, color) = qk_sea::warning(tsu);
-        qk_sea::set_pending(qk_sea::HandOff { flood: flood_out, k: qk_sea::wave_k(tsu), kind, color, expect: tsu.expect, major: kind.starts_with("MAJOR"), poles, siren: cfg.siren, seed: geo.seed });
+        let k0 = qk_sea::wave_k(tsu);
+        qk_sea::set_pending(qk_sea::HandOff { flood: flood_out, k: k0, kind, color, expect: tsu.expect, major: kind.starts_with("MAJOR"), poles, siren: cfg.siren, seed: geo.seed });
+        // the run-up: a tsunami runs on inland and up the land well over its height at the coast (Tohoku's 10 to 15
+        // m ran up to 40), so the wave is made as big as it takes to reach the ground where the player stands as it
+        // comes, up to `QT_RUNUP` times its own; higher ground than that is safe, as it is in life
+        let tag = crate::ground::new_tag();
+        let t_ask = (len - 3.0).max(0.2);
+        p.later(t_ask, move |q| {
+            let [x, _, z] = crate::sdk::game::get_player().map_or(me, |p| [p.x, p.y, p.z]);
+            q.ev.push((t_ask, Act::Survey { tag, columns: vec![(x.floor() as i32, z.floor() as i32)] }));
+        });
+        let (block, point) = (target.block, target.point);
+        p.later((len - 1.0).max(0.3), move |_| {
+            let now = crate::sdk::game::get_player().map_or(me, |p| [p.x, p.y, p.z]);
+            let ground = crate::ground::at(now[0].floor() as i32, now[2].floor() as i32).map_or(now[1].floor(), f64::from);
+            let ts = super::tsunami::TsGeo::new(&Target { block, point }, now, 0.0);
+            let k = qk_sea::run_up_k(&ts, ground, k0);
+            qk_sea::with_pending(|h| h.k = k);
+        });
     }
     // (what would come after its end left out: the far player's last aftershock; but not what a stop must still do)
     p.ev.retain(|e| e.0 < len - 0.05 || matches!(e.1, Act::Cleanup(_)));
@@ -1843,6 +1993,49 @@ mod tests {
                 assert_eq!(q.tsunami.is_some(), plan.iter().any(|(_, a)| matches!(a, Act::Cleanup(_))), "{}", q.key);
             }
         }
+    }
+
+    #[test]
+    fn quake_shindo_seven_is_far_more_violent_than_six_lower() {
+        assert!(qk_violence(7.0) > 2.4 * qk_violence(5.7) && qk_violence(7.0) > 2.5);
+        assert!(qk_violence(4.0) < 0.4);
+    }
+
+    #[test]
+    fn quake_aftershocks_follow_omori_and_bath() {
+        for (i, q) in QK_PRESETS.iter().enumerate() {
+            let len = f64::from(qk_length(i, qk_sea::QT_COUNTDOWN));
+            let a = qk_aftershocks(q, 17 + i as u32, len);
+            assert!(a.len() >= 2 && a.len() <= QK_AFTER_MAX, "{}: {}", q.key, a.len());
+            assert!(a.windows(2).all(|w| w[0].t <= w[1].t), "{}", q.key);
+            assert!(a.iter().all(|x| x.t + 4.0 <= len && x.mw <= q.mw - 0.95 && x.drop > 0.0), "{}", q.key);
+            let top = a.iter().map(|x| x.mw).fold(0.0, f64::max);
+            assert!((top - (q.mw - 1.2)).abs() <= 0.25, "{}: the largest {top} (Båth: {})", q.key, q.mw - 1.2);
+            // (Omori: more in the first half of the window than in the second)
+            let mid = 0.5 * (a[0].t + len - 4.0);
+            assert!(a.iter().filter(|x| x.t < mid).count() * 2 >= a.len(), "{}", q.key);
+        }
+    }
+
+    #[test]
+    fn quake_tsunami_runs_up_to_the_player_but_not_past_its_limit() {
+        let target = Target { block: [0, 62, 0], point: [0.5, 63.0, 0.5] };
+        let ts = super::super::tsunami::TsGeo::new(&target, [0.5, 70.0, 300.5], 0.0);
+        let k0 = qk_sea::wave_k(QK_PRESETS[0].tsunami.as_ref().unwrap());
+        assert_eq!(qk_sea::run_up_k(&ts, 64.0, k0), k0, "low land: its own size");
+        let k = qk_sea::run_up_k(&ts, 80.0, k0);
+        assert!(k > k0 && k < qk_sea::QT_RUNUP * k0, "{k}");
+        assert!((qk_sea::run_up_k(&ts, 250.0, k0) - qk_sea::QT_RUNUP * k0).abs() < 1e-9, "a mountain: safe");
+    }
+
+    #[test]
+    fn quake_tsunami_warns_without_announcing_the_sea_drawing_back() {
+        let target = Target { block: [0, 64, 0], point: [0.5, 65.0, 0.5] };
+        qk_configure(QkConfig { countdown: qk_sea::QT_COUNTDOWN, siren: 1.0 });
+        let plan = quake_plan(&crate::lasers::EARTHQUAKE, &target, false, "minecraft:overworld", 17.0, [0.5, 66.0, 150.5], 0);
+        let _ = qk_sea::take_pending();
+        assert!(plan.iter().all(|(_, a)| !matches!(a, Act::Cmd(c) if c.contains("WITHDRAW"))));
+        assert!(plan.iter().any(|(_, a)| matches!(a, Act::Table(w) if f32::from_bits(w[QK_TAB_AFTER]) >= 2.0)));
     }
 
     /// A chunk's work over a made-up village by a river: houses fall, glass breaks, the trace tears through.

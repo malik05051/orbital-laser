@@ -11,7 +11,13 @@ radio (bosai musen) as the mod plays it from its siren poles.
 
 Writes Ogg Vorbis (mono, 48 kHz) into orbital-sounds/assets/orbital/sounds/quake/synth/ with ffmpeg.
     python3 tools/sounds_quake.py
+    python3 tools/sounds_quake.py --eew-recording PATH   # also your own EEW chime, as quake/eew.ogg and eew_far.ogg
+
+`--eew-recording` takes a recording of the Earthquake Early Warning's chime (someone else's: git-ignored, never
+published) and writes it beside the others' recordings with its far version; tools/build_mod.py then plays it for
+`quake.eew` in place of the synthesised tone.
 """
+import argparse
 import pathlib
 import subprocess
 import tempfile
@@ -87,20 +93,40 @@ def far(x):
     return tail * 0.7
 
 
-def write(name, x):
+def write(name, x, out=OUT):
     x = x / max(1e-9, np.abs(x).max()) * 0.89
-    OUT.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".wav") as w:
         with wave.open(w.name, "wb") as f:
             f.setnchannels(1)
             f.setsampwidth(2)
             f.setframerate(SR)
             f.writeframes((x * 32767).astype("<i2").tobytes())
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", w.name, "-c:a", "libvorbis", "-q:a", "5", str(OUT / f"{name}.ogg")], check=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", w.name, "-c:a", "libvorbis", "-q:a", "5", str(out / f"{name}.ogg")], check=True)
     print(f"{name}.ogg {len(x) / SR:.2f} s")
 
 
+def load(path):
+    """A recording as mono floats at SR."""
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.float32).astype(np.float64)
+
+
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--eew-recording", help="your own recording of the EEW chime (kept out of the repository)")
+    args = ap.parse_args()
+    if args.eew_recording:
+        x = load(args.eew_recording)
+        # (trimmed of silence at its ends, a short fade so it never clicks; its clipped peaks brought under full scale)
+        on = np.flatnonzero(np.abs(x) > 0.01)
+        x = x[on[0]:on[-1] + 1] if len(on) else x
+        f = np.minimum(1.0, np.arange(len(x))[::-1] / (0.03 * SR))
+        x = np.tanh(x * f * 1.2)
+        rec = OUT.parent
+        write("eew", x, rec)
+        write("eew_far", far(x), rec)
+        return
     sounds = {
         "siren3": siren(3.0),
         "siren5": siren(5.0),

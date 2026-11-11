@@ -12,3 +12,5 @@ tools/preview/target/
 # the player's own recordings of the JMA/NHK tsunami alert and sirens (copyrighted: kept out of the repository)
 orbital-sounds/assets/orbital/sounds/quake/nhk_alert.ogg
 orbital-sounds/assets/orbital/sounds/quake/siren.ogg
+orbital-sounds/assets/orbital/sounds/quake/eew.ogg
+orbital-sounds/assets/orbital/sounds/quake/eew_far.ogg

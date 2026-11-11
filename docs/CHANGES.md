@@ -16,6 +16,20 @@ What each release of Orbital Laser added, newest first. The current release is i
   12 m for Tohoku). J-Alert siren poles along the coast sound Japan's disaster-prevention radio in the JMA's siren
   patterns, each pole its own station, near and far (`/orbital sirenvolume`). `/orbital quake custom MAGNITUDE DEPTH
   [SHINDO]` for your own earthquake. The whole picture sways with the shaking. Fork only for now (greyed out natively).
+- The Earthquake's Shindo 7 is violent now, as the JMA's table has it (from 6+ no one stays standing; at 7 people are
+  thrown): the picture's sway and the camera's jolts grow steeply over 6+ and 7 (`qk_violence`), sudden hard jerks
+  win over the rolling, and with KNOCKBACK on (now on the Earthquake's wheel too) the shaking knocks the player about,
+  off their feet at 7. More houses come down at 7 (most wooden ones, many reinforced), more cracks.
+- Aftershocks (`qk_aftershocks`): Omori's law for their times, Gutenberg and Richter's for their sizes, the largest
+  about 1.2 under the main shock (Båth's law); each felt at its own Shindo with its rumble and its sway, an Earthquake
+  Early Warning before the strong ones, the actionbar saying `AFTERSHOCK · SHINDO … · M…`.
+- The Earthquake Early Warning's chime can be your own recording (`tools/sounds_quake.py --eew-recording PATH`,
+  git-ignored like the other two; `build_mod.py` plays it for `quake.eew`), for the alert in your pocket and from
+  the siren poles.
+- The tsunami: no more "SEA WITHDRAWING" messages, only the JMA's warning and its countdown. The sea draws back further
+  (7 blocks for Tohoku) and is seen going: the bared bed glistens wet, water streams off it back out to sea. The wave
+  runs up the land to where the player stands, up to three times its height at the coast (`run_up_k`, `QT_RUNUP`);
+  higher ground than that stays dry.
 - `tools/package_windows.py`: the Windows test build with this checkout's mod in it (the game from the release's
   Windows zip, the mod from `dist/orbital`; the Earthquake's two recordings left out).
 

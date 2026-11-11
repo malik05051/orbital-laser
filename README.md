@@ -262,7 +262,13 @@ Twenty lasers, five to a page of the wheel.
 
   **The shaking** is the whole picture moving together, as a camera in shaking hands (a great quake's long, slow
   heaves, a shallow one's quick jolts, a rattle over both), on top of the game's own camera shake, by the Shindo where
-  you are.
+  you are. It grows steeply over 6+ and 7, as the JMA's table has it (no one can stand; at 7 people are thrown): hard,
+  sudden jerks, and with **KNOCKBACK** on (the wheel's switch) you are knocked about, off your feet at 7.
+  **Aftershocks** follow, most of them early (Omori's law), the largest about 1.2 under the main shock (Båth's law),
+  each at its own Shindo, the strong ones warned of first.
+
+  **To watch the tsunami form**, stand on high ground near the coast and face the sea (from you through the target and
+  on out). Once the countdown ends, the wave rises out of the sea on the horizon and comes in across it to the coast.
 
   **Your own earthquake**: `/orbital quake custom MAGNITUDE DEPTH_KM [SHINDO]` (magnitude 5 to 9.6, depth 1 to 700 km,
   the highest Shindo as 0 to 7 or a class like `6+`; left out, it is worked out from the other two), or the wheel's
@@ -274,10 +280,12 @@ Twenty lasers, five to a page of the wheel.
   to lie beyond the target, at the sea's level (y 62), and the land inland towards you. As the shaking peaks the JMA's
   **Major Tsunami Warning** goes out with its expected height ("10 m+" for Tohoku, "5 m" for Noto), and a **countdown**
   to the first wave runs over the hotbar: `/orbital tsunamitime SECONDS` (10 to 300, kept; 60 by default), though it
-  never comes before the strong shaking is over. Then **the sea withdraws**, baring the seabed (real water taken out),
+  never comes before the strong shaking is over. Then **the sea withdraws** (no message: you see it go), baring
+  the seabed (real water taken out, the bed glistening wet, water streaming back out to sea),
   and **the wave comes**: the Tsunami strike itself, its animation, its surge over the land, its debris and its carry,
   but at the quake's own size, about 12 m for Tohoku instead of a wall hundreds of blocks high, sweeping only the land
-  it is deep enough over. The withdrawn sea comes back with it, and the hotbar gives what the coast's gauge observes and
+  it is deep enough over. It runs up the land to where you stand, up to three times its height at the coast (Tohoku's
+  ran up to 40 m); higher ground than that stays dry. The withdrawn sea comes back with it, and the hotbar gives what the coast's gauge observes and
   the highest so far.
 
   **The coast's sirens.** Six J-Alert siren poles stand along the coast (an iron post with loudspeaker horns; built as
@@ -287,7 +295,8 @@ Twenty lasers, five to a page of the wheel.
   Warning's 5 s on and 6 s off), a closing chime, again and again until the wave has come. Each pole is its own station,
   started a few seconds apart from the next and heard late and fainter by its distance, the far ones muffled and
   echoing: one wails close by while another answers from far off. `/orbital sirenvolume PERCENT` (0 to 200, kept; 100
-  by default, 0 silences them) sets their volume. The sirens, chimes and alert are synthesised by `tools/sounds_quake.py`
+  by default, 0 silences them) sets their volume. Your own recording of the Earthquake Early Warning's chime can replace
+  the synthesised alert: `python3 tools/sounds_quake.py --eew-recording PATH` before building. The sirens, chimes and alert are synthesised by `tools/sounds_quake.py`
   (nothing recorded). NHK's alert tone, and a recording of a coast's sirens heard faintly from further off, are your own
   recordings if you add them: put them in `orbital-sounds/assets/orbital/sounds/quake/` as `nhk_alert.ogg` and
   `siren.ogg` before building (they are kept out of the repository).

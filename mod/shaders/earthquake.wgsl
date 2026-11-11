@@ -4,7 +4,8 @@
 
 // ---- laser 19: the earthquake -------------------------------------------------------------------------------------
 // No beam, nothing from the sky: a historic earthquake (strike/quake.rs's QK_PRESETS) on the land round the target. The
-// game's own camera shakes (the plan's jolts); this pass never moves the picture. Dust kicks up along the trace as the
+// game's own camera shakes (the plan's jolts) and this pass sways the whole picture with it (`qk_violence`: hard at 6+
+// and 7), the aftershocks too (the plan's table, mod_data). Dust kicks up along the trace as the
 // rupture runs out along it, and boils up in patches over the land where it shook at 6- and over, from the houses that
 // fell and the slopes that slid, drifting and settling. A tsunami's water is real water blocks (strike/qk_sea.rs).
 // Everything here is strike/quake.rs's model: keep QK_*, qk_preset and qk_pulse in step with QK_PRESETS and QkGeo.
@@ -142,6 +143,47 @@ fn qk_ii(P: QkP, u: f32, d: f32) -> f32 {
 fn qk_shake(i: f32) -> f32 {
     return clamp((i - 2.5) / 4.5, 0.0, 1.0);
 }
+// How violent at intensity i (strike/quake.rs's qk_violence): steeply more over 6+ and 7.
+fn qk_violence(i: f32) -> f32 {
+    return qk_shake(i) * (1.0 + 1.6 * smoothstep(5.5, 7.0, i));
+}
+
+// The plan's table (strike/quake.rs's qk_table, QK_TAB_*): the aftershocks (a count, then each one's start, how much
+// weaker it shakes, its length) and the sea drawing back (its start, the first wave's arrival, how far down, how fast
+// it runs, the hand-over to the Tsunami, the sea's top water block).
+const QK_TAB_AFTER: u32 = 0u;
+const QK_TAB_SEA: u32 = 52u;
+fn qk_tab(i: u32) -> f32 {
+    if (i >= arrayLength(&mod_data)) {
+        return 0.0;
+    }
+    return bitcast<f32>(mod_data[i]);
+}
+// The strongest aftershock's violence at (u, d) at t (Shindo `ii` there for the main shock).
+fn qk_after(P: QkP, u: f32, d: f32, ii: f32, t: f32) -> f32 {
+    let n = i32(qk_tab(QK_TAB_AFTER));
+    if (n <= 0) {
+        return 0.0;
+    }
+    let s = qk_arrive(P, u, d).x;
+    var a = 0.0;
+    for (var k = 0; k < min(n, 16); k = k + 1) {
+        let i = QK_TAB_AFTER + 1u + 3u * u32(k);
+        let x = (t - qk_tab(i) - s) / max(qk_tab(i + 2u), 0.5);
+        if (x > 0.0 && x < 4.0) {
+            a = max(a, qk_violence(ii - qk_tab(i + 1u)) * qk_pulse_at(x));
+        }
+    }
+    return a;
+}
+// The sea's level over its own at the coast (blocks, below 0 drawn back) at t, before the first wave (qk_sea.rs's
+// sea_s, its drawing back), at a point `x` out to sea (x < 0: the trough comes in from offshore, `level`).
+fn qk_sea_s(x: f32, t: f32) -> f32 {
+    let draw = qk_tab(QK_TAB_SEA);
+    let arrive = qk_tab(QK_TAB_SEA + 1u);
+    let tt = t - min(x, 0.0) / max(qk_tab(QK_TAB_SEA + 3u), 1.0);
+    return -qk_tab(QK_TAB_SEA + 2u) * smoothstep(draw, draw + 0.6 * (arrive - draw), tt);
+}
 fn qk_front(P: QkP, u: f32) -> f32 {
     if (P.kind == 2) {
         return 0.0;
@@ -262,21 +304,25 @@ fn earthquake(in: StageIn) -> vec4<f32> {
     // camera is, by its Shindo and the shaking there now (qk_env, the plan's own model); a great quake's long, slow
     // rolling heaves, a shallow one's quick, hard jolts, a rattle over both. Zoomed in a little so no edge shows. ----
     var uv2 = uv;
-    if (t > QK_T0 && fade > 0.001) {
+    if (t > QK_T0) {
         let q = cam.xz - F.t;
         let cu = dot(q, F.st);
         let cd = dot(q, F.nm);
-        let a = qk_shake(qk_ii(P, cu, cd)) * qk_env(i, P, cu, cd, t) * k * fade;
+        let ic = qk_ii(P, cu, cd);
+        let a = max(qk_violence(ic) * qk_env(i, P, cu, cd, t) * fade, qk_after(P, cu, cd, ic, t)) * k;
         if (a > 0.001) {
             let great = smoothstep(7.6, 8.8, P.mw);
+            // (at 6+ and 7 the hard, sudden jerks win over the rolling: the ground throwing everything about)
+            let wild = smoothstep(1.2, 2.4, a);
             let s0 = seed_v() * 1.7;
             let fr = mix(2.7, 0.75, great);
             let roll = vec2<f32>(sin(t * fr * 6.2832 + s0) + 0.45 * sin(t * fr * 2.31 * 6.2832 + s0 * 2.0), cos(t * fr * 0.83 * 6.2832 + s0 * 3.0) + 0.4 * sin(t * fr * 1.73 * 6.2832 + s0));
             let jolt = vec2<f32>(fbm(vec2<f32>(t * 7.0, s0)) - 0.5, fbm(vec2<f32>(s0, t * 7.3)) - 0.5) * 2.0;
             let rattle = vec2<f32>(sin(t * 61.0 + s0), sin(t * 53.0 + s0 * 1.3));
-            let off = (roll * mix(0.55, 0.85, great) + jolt * mix(0.6, 0.25, great) + rattle * 0.06) * a * 0.016;
-            let rot = (sin(t * fr * 1.1 * 6.2832 + s0 * 5.0) * mix(0.25, 0.5, great) + (fbm(vec2<f32>(t * 5.0, s0 + 3.0)) - 0.5)) * a * 0.012;
-            let zoom = 1.0 + a * 0.05;
+            let jerk = vec2<f32>(fbm(vec2<f32>(t * 13.0, s0 + 7.0)) - 0.5, fbm(vec2<f32>(s0 + 9.0, t * 12.1)) - 0.5) * 2.0;
+            let off = (roll * mix(0.55, 0.85, great) + jolt * mix(0.6, 0.25, great) + jerk * 0.7 * wild + rattle * (0.06 + 0.1 * wild)) * a * 0.016;
+            let rot = (sin(t * fr * 1.1 * 6.2832 + s0 * 5.0) * mix(0.25, 0.5, great) + (fbm(vec2<f32>(t * 5.0, s0 + 3.0)) - 0.5) * (1.0 + wild)) * a * 0.012;
+            let zoom = 1.0 + a * 0.055;
             let aspect = frame.resolution.x / frame.resolution.y;
             var c = (uv - vec2<f32>(0.5)) * vec2<f32>(aspect, 1.0) / zoom;
             c = vec2<f32>(c.x * cos(rot) - c.y * sin(rot), c.x * sin(rot) + c.y * cos(rot));
@@ -338,6 +384,40 @@ fn earthquake(in: StageIn) -> vec4<f32> {
             let up = smoothstep(0.0, 20.0, cu.y);
             let dc = mix(vec3<f32>(0.22, 0.18, 0.14), vec3<f32>(0.66, 0.58, 0.47), up) * (amb * 1.2 + vec3<f32>(0.7, 0.66, 0.6) * day);
             col = mix(col, dc, cu.x * k * fade);
+        }
+    }
+
+    // ---- the sea drawing back (a tsunami's): the water blocks go down a block at a time (qk_sea.rs's sea_work); here the
+    // bed it bares glistens wet, water streams off it back out to sea, and the sea's own surface runs out seaward. ----
+    let draw_t = qk_tab(QK_TAB_SEA);
+    if (draw_t > 0.0 && t > draw_t && t < qk_tab(QK_TAB_SEA + 4u) + 0.6 && !sky) {
+        let w = cam + rel;
+        let q = w.xz - F.t;
+        let u = dot(q, F.st);
+        let dd = dot(q, F.nm);
+        let sea_y = qk_tab(QK_TAB_SEA + 5u);
+        let inside = (1.0 - smoothstep(170.0, 184.0, abs(u))) * (1.0 - smoothstep(110.0, 122.0, -dd)) * (1.0 - smoothstep(0.0, 6.0, dd));
+        if (inside > 0.0) {
+            let s = qk_sea_s(dd, t);
+            // (the water's surface as the blocks have it: the top water block's, its surface 7/8 up it)
+            let lvl = sea_y + round(s) + 0.875;
+            let on = smoothstep(draw_t, draw_t + 2.0, t) * inside * k;
+            let skyc = mix(vec3<f32>(0.04, 0.05, 0.08), vec3<f32>(0.42, 0.56, 0.8), day);
+            let graze = pow(1.0 - saturate(-rd.y), 3.0);
+            let flow = t * 2.2;
+            if (w.y > lvl + 0.04 && w.y < sea_y + 1.02) {
+                // the bared bed: dark, wet, the sky in it, rivulets running off it out to sea (along -nm), the sun glinting
+                let streak = smoothstep(0.55, 0.8, fbm(vec2<f32>(u * 0.42, (dd + flow * 3.0) * 0.09) + vec2<f32>(seed_v() * 0.3, 0.0)));
+                var wet = col * 0.5 + skyc * (0.06 + 0.3 * graze);
+                let glint = pow(saturate(dot(reflect(rd, vec3<f32>(0.0, 1.0, 0.0)), normalize(sun))), 60.0) * step(0.0, sun.y);
+                wet = wet + vec3<f32>(1.0, 0.95, 0.85) * glint * (0.4 + streak) * day;
+                wet = mix(wet, skyc * 0.6 + vec3<f32>(0.03, 0.05, 0.06), streak * 0.55);
+                col = mix(col, wet, on);
+            } else if (abs(w.y - lvl) < 0.2) {
+                // the sea's surface running out: bands of foam and ripples streaming seaward
+                let band = smoothstep(0.62, 0.86, fbm(vec2<f32>(u * 0.08, (dd + flow * 5.0) * 0.05) + vec2<f32>(3.7, seed_v() * 0.2)));
+                col = mix(col, vec3<f32>(0.75, 0.8, 0.82) * (0.25 + 0.75 * day), band * 0.45 * on);
+            }
         }
     }
 
