@@ -500,21 +500,21 @@ pub fn qk_tsunami_extras(p: &mut Plan, geo: &super::tsunami::TsGeo, h: HandOff, 
     sirens(p, &h.poles, geo.t[1], me, 0.0, tt + 24.0, h.major, h.siren, h.seed);
     let t0 = (tt - 1.5) as f32;
     p.at(t0, "title @s times 5 60 20");
-    p.at(t0, format!(r##"title @s subtitle {{"text":"Expected {}  ·  get to high ground","color":"#{:06X}"}}"##, h.expect, h.color));
-    p.at(t0, format!(r##"title @s title {{"text":"TSUNAMI ARRIVING","color":"#{:06X}","bold":true}}"##, h.color));
+    p.at(t0, format!(r##"title @s subtitle {{"text":"{}  ·  get to high ground","color":"#{:06X}"}}"##, h.expect, h.color));
+    p.at(t0, format!(r##"title @s title {{"text":"TSUNAMI","color":"#{:06X}"}}"##, h.color));
     let mut top = 0.0f64;
     for k in 0..40 {
         let t = f64::from(k);
         let obs = geo.level(0.0, 0.0, t).unwrap_or(-1.0);
         top = top.max(obs);
         let text = if t < tt {
-            format!("{}  ·  expected {}  ·  the wave reaches the coast in {}", h.kind, h.expect, mmss(tt - t))
+            format!("{}  ·  {}  ·  wave in {}", h.kind, h.expect, mmss(tt - t))
         } else if obs > 0.0 {
-            format!("{}  ·  observed {obs:+.1} m at the coast  ·  highest so far {top:.1} m", h.kind)
+            format!("TSUNAMI  ·  {obs:+.1} m  ·  max {top:.1} m")
         } else {
-            format!("TSUNAMI  ·  highest observed {top:.1} m  ·  more waves may come: stay on high ground")
+            format!("TSUNAMI  ·  max {top:.1} m  ·  stay on high ground")
         };
-        p.ev.push((t as f32, Act::Cmd(format!(r##"title @s actionbar {{"text":"{text}","color":"#{:06X}","bold":true}}"##, h.color))));
+        p.ev.push((t as f32, Act::Cmd(format!(r##"title @s actionbar {{"text":"{text}","color":"#{:06X}"}}"##, h.color))));
     }
 }
 

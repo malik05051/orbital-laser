@@ -1349,8 +1349,9 @@ fn qk_load_boxes(chunks: &[(i32, i32, f64)]) -> Vec<[i32; 4]> {
 // ---- the plan ----------------------------------------------------------------------------------------------------------
 
 /// The actionbar line, in a colour.
+/// (short and not bold: the actionbar is one line across the middle of the screen, and a long one runs off its sides)
 fn bar(text: &str, rgb: u32) -> String {
-    format!(r##"title @s actionbar {{"text":"{text}","color":"#{rgb:06X}","bold":true}}"##)
+    format!(r##"title @s actionbar {{"text":"{text}","color":"#{rgb:06X}"}}"##)
 }
 
 /// A second of the shaking where the player is now: the jolts, and the actionbar's Shindo.
@@ -1381,28 +1382,28 @@ fn qk_second(q: &mut Plan, geo: Rc<QkGeo>, t0: f32, me0: [f64; 3], sea: Option<q
     // tsunami, once the shaking is over, the JMA's warning: its countdown, the sea as the coast's gauge sees it
     let tf = f64::from(t0);
     let last = quake.pulses.iter().map(|p| f64::from(p.0) + f64::from(p.2)).fold(0.0f64, f64::max) + f64::from(QK_T0) + arr_s;
-    let title = format!("{}  Mw {:.1}", quake.name.to_uppercase(), quake.mw);
+    let title = format!("M{:.1}", quake.mw);
     let shaking = tf + 1.0 >= tp && tf <= last && (peak > 0.04 || tf + 1.0 >= ts) && ii >= 0.5;
     let shindo = || {
         let est = if quake.estimated { " (est.)" } else { "" };
-        let w = if words == cls { String::new() } else { format!("  ·  {words}") };
-        bar(&format!("SHINDO {cls}{est}{w}  ·  {title}"), rgb)
+        let w = if words == cls { String::new() } else { format!(" ({words})") };
+        bar(&format!("SHINDO {cls}{w}{est}  ·  {title}"), rgb)
     };
     let tsunami = quake.tsunami.as_ref().zip(sea).filter(|(_, st)| tf >= st.warn - 0.01 && tf < st.end).map(|(tsu, st)| {
         let (kind, col) = qk_sea::warning(tsu);
         let s = qk_sea::sea_s(tsu, &st, tf);
         if tf < st.draw {
-            bar(&format!("{kind}  ·  expected {}  ·  first wave in {}", tsu.expect, qk_sea::mmss(st.arrive - tf)), col)
+            bar(&format!("{kind}  ·  {}  ·  wave in {}", tsu.expect, qk_sea::mmss(st.arrive - tf)), col)
         } else if tf < st.arrive {
-            bar(&format!("{kind}  ·  the sea is withdrawing: {s:+.1} m at the coast  ·  first wave in {}", qk_sea::mmss(st.arrive - tf)), col)
+            bar(&format!("SEA WITHDRAWING  ·  {s:+.1} m  ·  wave in {}", qk_sea::mmss(st.arrive - tf)), col)
         } else if tf < st.end - 12.0 {
-            bar(&format!("{kind}  ·  observed {s:+.1} m at the coast  ·  highest so far {:.1} m", qk_sea::observed_max(tsu, &st, tf)), col)
+            bar(&format!("TSUNAMI  ·  {s:+.1} m  ·  max {:.1} m", qk_sea::observed_max(tsu, &st, tf)), col)
         } else {
-            bar(&format!("TSUNAMI  ·  highest observed {:.1} m  ·  stay on high ground", qk_sea::observed_max(tsu, &st, tf)), col)
+            bar(&format!("TSUNAMI  ·  max {:.1} m  ·  stay on high ground", qk_sea::observed_max(tsu, &st, tf)), col)
         }
     });
     let line = if quake.eew && tf >= f64::from(QK_T0) + 1.0 && tf < ts && ii >= 3.5 {
-        Some(bar(&format!("EARTHQUAKE EARLY WARNING  ·  strong shaking  ·  SHINDO {cls} expected"), 0xFF2800))
+        Some(bar(&format!("EARTHQUAKE EARLY WARNING  ·  SHINDO {cls}"), 0xFF2800))
     } else if shaking && (tsunami.is_none() || (t0 as i32) % 3 != 2) {
         // (while it still shakes after the tsunami warning went out, the two take turns)
         Some(shindo())
@@ -1492,10 +1493,12 @@ fn qk_sea_warnings(p: &mut Plan, geo: &QkGeo, tsu: &qk_sea::Tsu, st: &qk_sea::Se
         let t = t as f32;
         p.at(t, "title @s times 10 70 20");
         p.at(t, format!(r##"title @s subtitle {{"text":"{sub}","color":"#{rgb:06X}"}}"##));
-        p.at(t, format!(r##"title @s title {{"text":"{head}","color":"#{rgb:06X}","bold":true}}"##));
+        p.at(t, format!(r##"title @s title {{"text":"{head}","color":"#{rgb:06X}"}}"##));
     };
-    title(p, st.warn, kind, &format!("Expected {}  ·  first wave in {}  ·  get to high ground now", tsu.expect, qk_sea::mmss(st.arrive - st.warn)), col);
-    title(p, st.draw + 1.0, "THE SEA IS WITHDRAWING", "The waves are coming  ·  get to high ground", col);
+    // (a title is drawn four times the size: its line short, the rest in the subtitle under it)
+    let major = if kind.starts_with("MAJOR") { "Major warning" } else { "Warning" };
+    title(p, st.warn, "TSUNAMI", &format!("{major}  ·  {}  ·  get to high ground", tsu.expect), col);
+    title(p, st.draw + 1.0, "SEA WITHDRAWING", "The wave is coming  ·  get to high ground", col);
     let alert = |p: &mut Plan, t: f64, vol: f32| p.ev.push((t as f32, Act::Sound { event: "orbital:quake.nhk_alert".into(), at: None, volume: vol, pitch: 1.0 }));
     alert(p, st.warn, 0.9);
     alert(p, st.draw + 1.0, 0.8);
