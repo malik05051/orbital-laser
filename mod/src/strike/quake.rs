@@ -1896,9 +1896,18 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
 
     if terrain {
         let chunks = qk_chunks(&geo);
-        for [x0, z0, x1, z1] in qk_load_boxes(&chunks) {
-            p.at(0.0, format!("forceload add {x0} {z0} {x1} {z1}"));
-            p.ev.push((len - 1.0, Act::Spare(format!("forceload remove {x0} {z0} {x1} {z1}"))));
+        // (kept loaded only while they are needed: the land once its work is in, the sea's coast until the hand-over;
+        // a tsunami's countdown can be minutes, and every chunk held loaded is memory the game holds, and saves)
+        let land_by = sea.map_or(f64::from(len) - 8.0, |st| st.draw - 3.0);
+        let (coast, land): (Vec<_>, Vec<_>) = chunks.iter().copied().partition(|&(cx, cz, _)| quake.tsunami.as_ref().is_some_and(|ts| qk_sea::sea_covers(&geo, ts, cx, cz)));
+        for (part, until) in [(land, ((land_by + 6.0) as f32).min(len - 1.0)), (coast, len - 1.0)] {
+            if part.is_empty() {
+                continue;
+            }
+            for [x0, z0, x1, z1] in qk_load_boxes(&part) {
+                p.at(0.0, format!("forceload add {x0} {z0} {x1} {z1}"));
+                p.ev.push((until, Act::Spare(format!("forceload remove {x0} {z0} {x1} {z1}"))));
+            }
         }
         let parts = chunks.len().div_ceil(QK_PART);
         let w = Rc::new(RefCell::new(Work {
@@ -1912,7 +1921,7 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
             retry_q: None,
             next_retry: 0.0,
             // (the land worked out before the sea draws back: the sea works on it as the quake leaves it)
-            land_by: sea.map_or(f64::from(len) - 8.0, |st| st.draw - 3.0),
+            land_by,
             fires: 0,
             collapsed: 0,
             walls: 0,

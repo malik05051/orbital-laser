@@ -164,8 +164,7 @@ impl Flood {
     }
     /// Whether the chunk (cx, cz) lies where the sea works.
     pub fn covers(&self, cx: i32, cz: i32) -> bool {
-        let (u, d) = self.geo.ud(f64::from(cx) * 16.0 + 8.0, f64::from(cz) * 16.0 + 8.0);
-        u.abs() <= QT_HALF + 8.0 && d >= -QT_OUT - 8.0 && d <= self.ts().reach + 16.0
+        sea_covers(&self.geo, self.ts(), cx, cz)
     }
     /// A chunk as the quake left it: kept if the sea can reach any of it.
     pub fn add(&mut self, cx: i32, cz: i32, cols: Box<[FCol; 256]>) {
@@ -185,6 +184,12 @@ impl Flood {
             self.chunks.push(FChunk { cx, cz, cols, reached: false });
         }
     }
+}
+
+/// Whether the chunk (cx, cz) lies where tsunami `ts`'s sea works (it stays loaded until the sea is put back).
+pub fn sea_covers(geo: &QkGeo, ts: &Tsu, cx: i32, cz: i32) -> bool {
+    let (u, d) = geo.ud(f64::from(cx) * 16.0 + 8.0, f64::from(cz) * 16.0 + 8.0);
+    u.abs() <= QT_HALF + 8.0 && d >= -QT_OUT - 8.0 && d <= ts.reach + 16.0
 }
 
 /// A column's water top at second `t`, `x` blocks inland.
