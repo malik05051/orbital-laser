@@ -489,7 +489,8 @@ laser, command, capability and timing). This file is the short, factual version 
   changed.
 - The Windows test build (`orbital-laser-windows-test.zip`): `python3 tools/package_windows.py` after
   `tools/build_mod.py` puts `dist/orbital` into the released zip's game (nothing is compiled for Windows; the mod is the
-  same everywhere). Never pack the Earthquake's two recordings into anything published.
+  same everywhere). Never pack the Earthquake's recordings into anything published. The `Windows build` workflow
+  (`.github/workflows/windows-build.yml`) does the same on every pull request and push to main, the zip its artifact.
 - Run `install.py` with the game closed. Don't touch the user's saves or settings beyond what it does.
 
 ## Commands

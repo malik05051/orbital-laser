@@ -42,6 +42,8 @@ What each release of Orbital Laser added, newest first. The current release is i
   (7 blocks for Tohoku) and is seen going: the bared bed glistens wet, water streams off it back out to sea. The wave
   runs up the land to where the player stands, up to three times its height at the coast (`run_up_k`, `QT_RUNUP`);
   higher ground than that stays dry.
+- A `Windows build` workflow: every pull request and push to main builds the mod and the Windows test zip, as the
+  run's artifact.
 - `tools/package_windows.py`: the Windows test build with this checkout's mod in it (the game from the release's
   Windows zip, the mod from `dist/orbital`; the Earthquake's two recordings left out).
 
