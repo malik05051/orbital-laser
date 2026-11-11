@@ -18,7 +18,11 @@ Setup, once
 Play
   Double-click play.bat. It opens a creative world called OrbitalTest.
   Type /orbital give for the Designator. Press R with it in hand for the laser wheel, click a laser, then aim
-  and hold right-click to fire. The Fold and the Supervolcano are on page 4 of the wheel. The middle of the wheel turns terrain damage off.
+  and hold right-click to fire. The Fold, the Supervolcano and the Earthquake are on page 4 of the wheel. The middle of the wheel turns terrain damage off.
+  The Earthquake's presets are on the row under the wheel; /orbital quake custom MW DEPTH [SHINDO] sets your own,
+  /orbital tsunamitime N the tsunami warning's countdown, /orbital sirenvolume N the sirens' volume.
+  NHK's alert tone and the far-off siren recording aren't included (they aren't ours to give away); to add them, put
+  nhk_alert.ogg and siren.ogg in game\horizon-mods\orbital\assets\orbital\sounds\quake\.
 
 If something goes wrong
   Options > Mods says why the mod stopped, if it did. The game's log is
@@ -27,5 +31,6 @@ If something goes wrong
 Please tell us
   - whether prepare.bat worked
   - whether the Fold and the Supervolcano ran to the end, and whether their craters appeared
+  - whether the Earthquake's tsunami and its sirens played to the end, and whether the game closes cleanly after
   - whether the effects draw with Options > Graphics > Advanced > Graphics API on DirectX 12, and on Vulkan
   - your frame rate during the fold and the eruption

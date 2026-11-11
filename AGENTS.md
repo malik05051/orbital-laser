@@ -484,6 +484,9 @@ laser, command, capability and timing). This file is the short, factual version 
 - **Tested on Linux only** (a user reports Windows 11 working, the fork built from source with `--features mods`; on
   macOS the Downfall's pass crashes Metal's compiler). On Windows and macOS keep fixes small and tell the user what you
   changed.
+- The Windows test build (`orbital-laser-windows-test.zip`): `python3 tools/package_windows.py` after
+  `tools/build_mod.py` puts `dist/orbital` into the released zip's game (nothing is compiled for Windows; the mod is the
+  same everywhere). Never pack the Earthquake's two recordings into anything published.
 - Run `install.py` with the game closed. Don't touch the user's saves or settings beyond what it does.
 
 ## Commands
