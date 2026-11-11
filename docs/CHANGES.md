@@ -16,6 +16,8 @@ What each release of Orbital Laser added, newest first. The current release is i
   12 m for Tohoku). J-Alert siren poles along the coast sound Japan's disaster-prevention radio in the JMA's siren
   patterns, each pole its own station, near and far (`/orbital sirenvolume`). `/orbital quake custom MAGNITUDE DEPTH
   [SHINDO]` for your own earthquake. The whole picture sways with the shaking. Fork only for now (greyed out natively).
+- `tools/package_windows.py`: the Windows test build with this checkout's mod in it (the game from the release's
+  Windows zip, the mod from `dist/orbital`; the Earthquake's two recordings left out).
 
 ## 0.5.14
 

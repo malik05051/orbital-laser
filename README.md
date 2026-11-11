@@ -365,6 +365,9 @@ Supervolcano, the Sky Breaks, the Carpet Bomb and the Earthquake reach 1000. [Ho
    **On Windows**, try the test build: download `orbital-laser-windows-test.zip` from the
    [latest release](https://github.com/Stink-O/orbital-laser/releases/latest) and follow its `README-WINDOWS.txt`. The game and the mod are both in it,
    so skip the steps below. It has only been run under Wine, never on real Windows, so please report how it goes.
+   The same zip with the Earthquake in it is on this fork's
+   [Earthquake test release](https://github.com/malik05051/orbital-laser/releases/tag/v0.5.14-quake.1), used the same way
+   (`tools/package_windows.py` makes it from the release's zip and `dist/orbital`).
 
    **On macOS**, or to build Windows yourself, build it from source instead: branch `mod-api-input-ui-render-world` of
    [Stink-O/horizon](https://github.com/Stink-O/horizon/tree/mod-api-input-ui-render-world), with the mod runtime
