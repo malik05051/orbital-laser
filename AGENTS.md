@@ -446,20 +446,24 @@ laser, command, capability and timing). This file is the short, factual version 
   column the slip brought there, real size, so the chunks are read `QK_M` columns wider), a megathrust lies beyond the
   target and breaks nothing on land. The land: the chunks within `QK_REACH` (208) shaking at 4.5 or more, force-loaded,
   read `QK_PART` at a time three out, each worked out once into one edit of only what changed, due when the strong
-  shaking reaches it (`strong_at`) or the trace breaks there (`trace_at`). **Its tsunami** (Tohoku, Kanto, Noto,
-  Valdivia: `Quake::tsunami`, `strike/qk_sea.rs`) is real water, no pass: the target is the coast (the sea beyond it,
-  d < 0, at `SEA` 62); `sea_time` the warning (as the shaking peaks), the countdown (`/orbital tsunamitime`, kept, the
-  plan's option's bits 8 up, `qk_option`), the sea drawing back and the first wave (never before the strong shaking is
-  over) and the end; `sea_s` the sea at the coast (drawn back by `draw`, then the `waves`), `level` inland (later by
-  `speed`, lower to nothing at `reach`). `qk_chunk` records what the sea will find in each chunk it may reach
-  (`sea_col`, `Flood::add`); `sea_work` visits them in turn about once a second from the draw-back to the end, bringing
-  each column's water where `level` has it (filling only air, taking out only water) and washing away houses in deep
-  enough water; `sea_restore`, `Act::Cleanup` stages at the end, puts all of it back (also on a stop). The strike's length
-  is `qk_length` (`fire_at` gives it). J-Alert siren poles (`siren_pole`: iron bars, lightning-rod horns; columns with
-  a lightning rod are left alone by the quake and the sea) stand along the coast from the start, terrain on; the sirens
-  and NHK's alert tone (`quake.siren`, `quake.nhk_alert`) are the user's own recordings, git-ignored. Keep earthquake.wgsl's `QK_*`, `qk_preset` and `qk_pulse` in step with `QK_PRESETS` and
-  `QkGeo`; its params: the strike in [6], the player in [12..15], the preset in [15]. The pass never moves the picture
-  (moving pixels by where they are in the world smeared and doubled the land). Its other sounds are approved ones (the
+  shaking reaches it (`strong_at`) or the trace breaks there (`trace_at`). **Its tsunami** (`Quake::tsunami`, `strike/qk_sea.rs`): the target is the coast (the sea beyond it, d < 0, at `SEA`
+  62); `sea_time` the warning (as the shaking peaks), the countdown (`/orbital tsunamitime`, kept), the sea drawing back
+  (real water taken out, `sea_work`), and the hand-over (`SeaTime::end`, `TS_T` before the first wave): the quake's plan
+  leaves a `HandOff` (`set_pending`), and as the quake ends on its own lib.rs fires the Tsunami at the same target with
+  `ts_set_scale(wave_k)` (its `TsGeo::k` and the pass's `ts_k`, params[10]: every height of the wave, its spray and its
+  sweep of the land scaled; its speed and reach kept) and `qk_activate`, which `tsunami_plan` takes (`qk_tsunami_extras`:
+  the sea put back as the wave reaches the coast, the sirens on, its title and gauge). A stop or leaving drops the
+  hand-over and the quake's own `Act::Cleanup`s put the sea back. Custom quakes: `qk_set_custom` (index `QK_CUSTOM`,
+  `qk_quake`; the pass draws the nearest preset, `qk_pass_preset`), `/orbital quake custom MW DEPTH [SHINDO]`, kept as
+  `customquake=`. Settings reach the plan through `qk_configure` (`QkConfig`: the countdown, the siren volume,
+  `/orbital sirenvolume`). Siren poles (`siren_sites`, six; `siren_pole`: iron bars, lightning-rod horns; a column with a
+  lightning rod is left alone by the quake and the sea) are built at the start with the terrain on; `sirens` and
+  `eew_alert` play the disaster radio from them, each pole its own station (a few seconds' offset, late and fainter by
+  its distance, `_far` muffled past 140), in the JMA's patterns; the sounds by `tools/sounds_quake.py` (`quake.siren3`,
+  `siren5`, `chime_up`, `chime_down`, `eew`, each with `_far`); `quake.nhk_alert` and `quake.siren` are the user's own
+  recordings, git-ignored. The pass sways the whole picture by the shaking where the camera is (never a pixel by where it
+  is in the world). Keep earthquake.wgsl's `QK_*`, `qk_preset` and `qk_pulse` in step with `QK_PRESETS` and
+  `QkGeo`; its params: the strike in [6], the player in [12..15], the preset in [15]. Its other sounds are approved ones (the
   Sinkhole's, the Supervolcano's, the Sky Breaks' and the Tsunami's). Tests `quake_*`, `qk_sea_*`; `qk_print_table`
   (ignored) prints the Shindo and arrivals by distance. **Motion sensitivity:** the camera shakes for up to 90 s.
 - **Minecraft is not part of this repo.** Horizon's prepared resources come from the user's own Minecraft Java 26.3
@@ -501,6 +505,7 @@ tools/preview.py skybreak 49 --views sbruin,hdcrater  # the blocks its panes and
 python3 tools/sounds_skybreak.py --only --listen DIR  # the Sky Breaks' sounds mixed as the game does from 30, 300 and 800 blocks
 tools/preview.py carpetbomb 6 11 15 22 --views cpplayer,cpside,fside  # the Carpet Bomb offscreen (views cp*, its last blast fside, the fires cpfire, the bomber cpskyf, cpskyb)
 tools/preview.py earthquake 5.5 9 22 --set quake=1    # the Earthquake offscreen (views qk*; quake=N the preset, 1 Kobe)
+python3 tools/sounds_quake.py                         # the Earthquake's sirens, chimes and alert (synthesised)
 python3 tools/sounds_carpetbomb.py                   # the Carpet Bomb's sounds (`--mix CUES OUT` a strike's cues, from cp_write_cues, into one file)
 python3 -I tools/bake_hand.py MESH_DIR               # the hand's sculpted shape baked into mod/assets/sb_hand.bin and the pass's [bake table]
 tools/world_snapshot.py save|restore|reset WORLD [NAME]  # snapshot a world and put it back (refuses while it's open; reset leaves, restores, rejoins)
@@ -517,7 +522,7 @@ install and check it in the game, once. In the game, `/orbital skip SECONDS` (te
 far in, so one moment can be looked at without sitting through the rest; `horizon-ctl command "orbital skip 29"`
 from a script.
 
-In the game: `/orbital give` (the designator), `/orbital wheel`, `/orbital plasma`, `godly`, `blackhole`, `meteor`, `mothership`, `downfall`, `planetkiller`, `crystalbloom`, `sinkhole`, `payload`, `nuke`, `rod`, `supercell`, `hurricane`, `tsunami`, `fold`, `supervolcano`, `skybreak`, `carpetbomb` or `earthquake`, `/orbital quake tohoku|kobe|kanto|kumamoto|noto|valdivia`, `/orbital tsunamitime SECONDS`, `/orbital approach …`, `/orbital arrival …`, `/orbital colour …`, `/orbital terrain on|off`, `/orbital hud on|off`, `/orbital payloadsound main|alt`, `/orbital nukesound main|alt`, `/orbital quality full|fast`, `/orbital impactframes kanada|blackflash|cinematic|off` (`on` brings back the last look), `/orbital seed N|lock|random` (kept, the wheel's SEED field and LOCK SEED switch: N in 1-997 holds every strike's seed, `lock` holds the last strike's, `random` lets go), `/orbital knockback on|off` (the Nuke's, the Rod's, the Fold's, the Supervolcano's and the Carpet Bomb's push, the Hurricane's and the Tsunami's carry; kept, the wheel's KNOCKBACK switch), `/orbital carryview turn|still` (kept: whether the Hurricane's carry turns the player's view a little with them round the storm and sways it with the gusts, `CARRY_TURN`; `still` leaves the view their own), `/orbital follow on|off` and `/orbital follow distance N` (kept, the wheel's FOLLOW switch: an orbit camera round a Nuke's or a Payload's bomb, `follow.rs`: the player's own look sets the angle, the camera `distance` (70) back from the bomb along it; moved only by `world.push-player` kicks each tick, never faster than 24 blocks a tick (`VMAX`: past that the game's collision sweep runs out of budget and crashes), worked out against the game's own drag so its movement and frame interpolation carry it, never a teleport or a turn of the view; it leaves the player once the bomb is within 440 blocks of them, so it stays on land already loaded; backs off to 380 (the Payload 170) as the burst nears, orbits the cloud, and a `tp ... ~ ~` puts them back), `/orbital flyspeed N|reset`, `/orbital stop` (ends the strike under way; also the wheel's STOP STRIKE button while one is), `/orbital skip SECONDS`.
+In the game: `/orbital give` (the designator), `/orbital wheel`, `/orbital plasma`, `godly`, `blackhole`, `meteor`, `mothership`, `downfall`, `planetkiller`, `crystalbloom`, `sinkhole`, `payload`, `nuke`, `rod`, `supercell`, `hurricane`, `tsunami`, `fold`, `supervolcano`, `skybreak`, `carpetbomb` or `earthquake`, `/orbital quake tohoku|kobe|kanto|kumamoto|noto|valdivia`, `/orbital quake custom MW DEPTH [SHINDO]`, `/orbital tsunamitime SECONDS`, `/orbital sirenvolume PERCENT`, `/orbital approach …`, `/orbital arrival …`, `/orbital colour …`, `/orbital terrain on|off`, `/orbital hud on|off`, `/orbital payloadsound main|alt`, `/orbital nukesound main|alt`, `/orbital quality full|fast`, `/orbital impactframes kanada|blackflash|cinematic|off` (`on` brings back the last look), `/orbital seed N|lock|random` (kept, the wheel's SEED field and LOCK SEED switch: N in 1-997 holds every strike's seed, `lock` holds the last strike's, `random` lets go), `/orbital knockback on|off` (the Nuke's, the Rod's, the Fold's, the Supervolcano's and the Carpet Bomb's push, the Hurricane's and the Tsunami's carry; kept, the wheel's KNOCKBACK switch), `/orbital carryview turn|still` (kept: whether the Hurricane's carry turns the player's view a little with them round the storm and sways it with the gusts, `CARRY_TURN`; `still` leaves the view their own), `/orbital follow on|off` and `/orbital follow distance N` (kept, the wheel's FOLLOW switch: an orbit camera round a Nuke's or a Payload's bomb, `follow.rs`: the player's own look sets the angle, the camera `distance` (70) back from the bomb along it; moved only by `world.push-player` kicks each tick, never faster than 24 blocks a tick (`VMAX`: past that the game's collision sweep runs out of budget and crashes), worked out against the game's own drag so its movement and frame interpolation carry it, never a teleport or a turn of the view; it leaves the player once the bomb is within 440 blocks of them, so it stays on land already loaded; backs off to 380 (the Payload 170) as the burst nears, orbits the cloud, and a `tp ... ~ ~` puts them back), `/orbital flyspeed N|reset`, `/orbital stop` (ends the strike under way; also the wheel's STOP STRIKE button while one is), `/orbital skip SECONDS`.
 The wheel has pages of five (its arrows, its tabs or a right-click turn them); the Downfall, the Planet Killer, the Crystal Bloom, the Sinkhole and the Payload are on the second, the Nuke, the Rod from God, the Supercell, the Hurricane and the Tsunami on the third, the Fold, the Supervolcano, the Sky Breaks, the Carpet Bomb and the Earthquake on the fourth. Its FLY
 SPEED row over the title sets the creative flying speed (a click along the bar for 1x–40x, or a number typed in its
 box, up to 1000x, Enter to set), through `world.set-flying-speed` and `input.poll-typed`. A fork build without them, or

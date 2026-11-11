@@ -14,8 +14,18 @@ const TS_LEN: f32 = 42.0;       // the strike's length (lasers.rs)
 const TS_T: f32 = 9.0;          // when the front crosses the target
 const TS_V0: f32 = 100.0;       // its speed there, blocks a second, slowing past it
 const TS_C: f32 = 1.07e-5;      // (time to s: s / V0 + C s^2)
-const TS_SEA: f32 = 100.0;      // the level the wave rises from, under the target's ground
-const TS_A: f32 = 420.0;        // how far over that it stands at full strength, far out: 320 over the target's ground
+const TS_SEA0: f32 = 100.0;     // the level the wave rises from, under the target's ground (at full size: ts_k)
+const TS_A0: f32 = 420.0;       // how far over that it stands at full strength, far out: 320 over the target's ground
+// The wave's size, 1 the Tsunami's own: an Earthquake's tsunami is the same wave a tenth as high or so (frame.mod_params[2].z,
+// tsunami.rs's TsGeo::k; 0 or none is 1). Its heights go by it; its speed, its face's length and its reach stay.
+fn ts_k() -> f32 {
+    let p = frame.mod_params[2].z;
+    return select(1.0, p, p > 0.0 && p < 1.0);
+}
+fn ts_a() -> f32 { return TS_A0 * ts_k(); }
+// (what it throws up, its spray and its tails, by a smaller wave's size: less than its height's share, or it would throw nothing)
+fn ts_ks() -> f32 { return mix(pow(ts_k(), 0.62), 1.0, step(0.999, ts_k())); }
+fn ts_sea() -> f32 { return TS_SEA0 * ts_k(); }
 const TS_FACE: f32 = 105.0;     // the face's width, blocks
 const TS_HOLD: f32 = 6.5;       // seconds the water holds at its height, then
 const TS_DRAIN: f32 = 14.0;     // drains away over
@@ -118,7 +128,7 @@ fn ts_fall(lv: f32, x: f32) -> f32 {
         return lv;
     }
     let e = smoothstep(0.0, 0.42, x);
-    return mix(lv, 12.0 - 118.0 * x * x, e);
+    return mix(lv, (12.0 - 118.0 * x * x) * ts_k(), e);
 }
 // How long the land holds back the foot of the wave at (s, u), seconds, `gy` the land's height there: it climbs slowly on high
 // ground and runs on up the low ground, so its foot wraps the hills and tongues up the valleys. Only its foot: the wave over
@@ -146,8 +156,8 @@ fn ts_f(pa: vec3<f32>, t: f32, g: TsG) -> f32 {
     if (env < 0.03) {
         return 1.0e4;
     }
-    let a = TS_A * env;
-    let yb = clamp((pa.y + TS_SEA) / a, 0.0, 1.0);
+    let a = ts_a() * env;
+    let yb = clamp((pa.y + ts_sea()) / a, 0.0, 1.0);
     let y2 = yb * yb;
     // (a straight line out at sea; it starts to tear and pitch forward as it comes in)
     let inb = smoothstep(-560.0, -160.0, s);
@@ -169,7 +179,7 @@ fn ts_f(pa: vec3<f32>, t: f32, g: TsG) -> f32 {
     }
     // (the crest torn along its length)
     let tear = (fvnoise(vec2<f32>(u * 0.052 + g.sd, t * 0.9 + s * 0.01)) - 0.5) * (5.0 + 11.0 * inb) * smoothstep(0.8, 1.0, yb);
-    var lv = ts_fall(a * p - TS_SEA + tear, x);
+    var lv = ts_fall(a * p - ts_sea() + tear, x);
     // (the torrent is lumps of water, not a level sheet: out of the way of the camera, which rides it)
     if (x > 0.03 && x < 0.97) {
         let k = smoothstep(0.03, 0.2, x) * (1.0 - smoothstep(0.7, 0.95, x)) * smoothstep(10.0, 55.0, length(pa.xz - ts_cam.xz));
@@ -203,7 +213,7 @@ fn ts_march(ro: vec3<f32>, rd: vec3<f32>, t0: f32, t1: f32, time: f32, g: TsG, j
         }
         tin = max(tin, (s0 - sf) / -rs);
     }
-    let ytop = TS_A * 1.12 - TS_SEA + 30.0;
+    let ytop = ts_a() * 1.12 - ts_sea() + 30.0;
     if (ro.y > ytop) {
         if (rd.y >= -1.0e-4) {
             return h;
@@ -304,7 +314,7 @@ fn ts_surf_h(s: f32, u: f32, ta: f32, t: f32, g: TsG) -> f32 {
     if (p <= 0.0 || x >= 1.0) {
         return -1.0e4;
     }
-    return ts_fall(TS_A * env * p - TS_SEA, x);
+    return ts_fall(ts_a() * env * p - ts_sea(), x);
 }
 
 // ---- the debris: the land the wave swept up, in the game's own block textures ---------------------------------------
@@ -869,12 +879,12 @@ fn ts_surface(p: vec3<f32>, rd: vec3<f32>, ht: f32, time: f32, g: TsG, li: TsLig
     let s = dot(p.xz, g.m);
     let u = dot(p.xz, g.n);
     let env = ts_env(s, u, g);
-    let a = TS_A * env;
+    let a = ts_a() * env;
     let tau = time - ts_arr(s, u, g.sd);
     let vel = ts_vel(s);
     let w = tau * vel;
-    let ybar = clamp((p.y + TS_SEA) / a, 0.0, 1.05);
-    let dtop = max(a - TS_SEA - p.y, 0.0);
+    let ybar = clamp((p.y + ts_sea()) / a, 0.0, 1.05);
+    let dtop = max(a - ts_sea() - p.y, 0.0);
     let bk = ts_break(s, u, g.sd);
     // how many blocks a pixel covers here: what is too fine for it fades out
     let px = ht * 2.0 * tan(0.5 * frame.view_params.w) * frame.resolution.w;
@@ -900,7 +910,7 @@ fn ts_surface(p: vec3<f32>, rd: vec3<f32>, ht: f32, time: f32, g: TsG, li: TsLig
     let vd = v + drop * time;
     // (the lip frays into threads)
     let fray = ts_fbm3(vec3<f32>(u * 0.21, vd * 0.012, 3.0), 2 + i32(mid));
-    let reach = (5.0 + 9.0 * env) + (a - TS_SEA) * 0.17 * bk * bk * bk * smoothstep(-520.0, -180.0, s) * smoothstep(0.3, 0.7, warp);
+    let reach = (5.0 + 9.0 * env) + (a - ts_sea()) * 0.17 * bk * bk * bk * smoothstep(-520.0, -180.0, s) * smoothstep(0.3, 0.7, warp);
     let wc = 1.0 - dtop / reach + (warp2 - 0.5) * 0.7 + (fray - 0.5) * 0.9 + ch.h * 1.1 * ck;
     var white = smoothstep(0.0, 0.5, wc) * mix(smoothstep(0.36, 0.6, fray) * 0.7, 1.0, smoothstep(0.25, 0.75, wc)) * smoothstep(-20.0, 90.0, w + 60.0);
     // (the foot: a brown bore where the face meets the land, boiling in lumps)
@@ -1366,7 +1376,7 @@ fn ts_spray(ro: vec3<f32>, rd: vec3<f32>, t0: f32, t1: f32, time: f32, g: TsG, l
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
     // (and under the plume's top)
-    let ytop = TS_A * 1.1 - TS_SEA + 110.0;
+    let ytop = ts_a() * 1.1 - ts_sea() + 110.0 * ts_ks();
     if (rd.y > 1.0e-4) {
         tb = min(tb, (ytop - ro.y) / rd.y);
     } else if (rd.y < -1.0e-4 && ro.y > ytop) {
@@ -1400,10 +1410,10 @@ fn ts_spray(ro: vec3<f32>, rd: vec3<f32>, t0: f32, t1: f32, time: f32, g: TsG, l
         // (it comes off the crest as it stands now: ahead of the front the wave hasn't stood up yet)
         // (once it has stood up, that is just the wave's strength here)
         var rise = 1.0;
-        var lc = TS_A * env - TS_SEA;
+        var lc = ts_a() * env - ts_sea();
         if (sf < -380.0) {
             rise = ts_rise(min(s, sf), u, g.sd);
-            lc = TS_A * ts_env(min(s, sf), u, g) - TS_SEA;
+            lc = ts_a() * ts_env(min(s, sf), u, g) - ts_sea();
         }
         let ls = ts_surf_h(s, u, time, time, g);
         if (p.y < ls) {
@@ -1411,13 +1421,13 @@ fn ts_spray(ro: vec3<f32>, rd: vec3<f32>, t0: f32, t1: f32, time: f32, g: TsG, l
         }
         let bk = ts_break(s, u, g.sd);
         // (out at sea it throws a great curtain up; over the land less)
-        let tall = (26.0 + 44.0 * (1.0 - smoothstep(-650.0, -120.0, s))) * (0.55 + 0.45 * bk) * (0.2 + 0.8 * smoothstep(0.45, 1.0, rise));
+        let tall = (26.0 + 44.0 * (1.0 - smoothstep(-650.0, -120.0, s))) * (0.55 + 0.45 * bk) * (0.2 + 0.8 * smoothstep(0.45, 1.0, rise)) * ts_ks();
         let hc = max(p.y - lc, 0.0);
         let plume = exp(-pow(hc / tall, 1.6)) * smoothstep(-300.0, -60.0, dc - hc * 0.9) * (1.0 - smoothstep(0.0, 70.0 + hc * 0.12, dc - hc * 0.5)) * smoothstep(0.6 * lc, 0.97 * lc, p.y);
         // (the skirt: mist rolling ahead of the face, near the ground)
         let gr = ts_ground(s, u);
         let over = p.y - gr;
-        let skirt = smoothstep(-8.0, 6.0, over) * (1.0 - smoothstep(14.0, 72.0, over)) * exp(-max(dc, 0.0) / 120.0) * smoothstep(-110.0, 0.0, dc);
+        let skirt = smoothstep(-8.0, 6.0, over) * (1.0 - smoothstep(14.0 * ts_ks(), 72.0 * ts_ks(), over)) * exp(-max(dc, 0.0) / 120.0) * smoothstep(-110.0, 0.0, dc);
         if (plume + skirt < 0.004) {
             continue;
         }
@@ -1492,7 +1502,7 @@ fn ts_tails(ro: vec3<f32>, rd: vec3<f32>, t1: f32, tmore: f32, time: f32, g: TsG
         let hg = p.y - gb;
         // (where the ground rises against it, it is thrown up much harder)
         let hit = saturate((ts_ground(sr + 20.0, cu) - ts_ground(sr - 20.0, cu)) / 40.0 * 2.6);
-        let hb = (38.0 + 96.0 * r.x * r.x + 70.0 * hit) * sqrt(min(age / 0.8, 1.0));
+        let hb = (38.0 + 96.0 * r.x * r.x + 70.0 * hit) * sqrt(min(age / 0.8, 1.0)) * ts_ks();
         let climb = max(hg, 0.0);
         // (a fan of jets out of the one place it struck, each thrown off to one side, tearing up as it goes)
         let lean = (r.y - 0.5) * 0.7;
@@ -1533,8 +1543,8 @@ fn ts_dim(cs: f32, time: f32) -> f32 {
 // How long the water has been over a point at height y (blocks over the target's ground) at (s, u): negative before it
 // got there. The inverse of the face's rise.
 fn ts_closed(y: f32, s: f32, u: f32, time: f32, g: TsG) -> f32 {
-    let a = TS_A * ts_env(s, u, g);
-    let x = pow(clamp((y + TS_SEA) / max(a, 1.0), 0.0, 1.0), 1.0 / 1.7);
+    let a = ts_a() * ts_env(s, u, g);
+    let x = pow(clamp((y + ts_sea()) / max(a, 1.0), 0.0, 1.0), 1.0 / 1.7);
     return time - ts_arr(s, u, g.sd) - x * TS_FACE / ts_vel(s);
 }
 
@@ -1726,7 +1736,7 @@ fn tsunami(in: StageIn) -> vec4<f32> {
             var sh = 0.0;
             if (Ls < -0.02) {
                 let tc = (ahead + 60.0) / -Ls;
-                let top = TS_A * ts_env(ps - ahead, dot(pl.xz, g.n), g) - TS_SEA + 20.0;
+                let top = ts_a() * ts_env(ps - ahead, dot(pl.xz, g.n), g) - ts_sea() + 20.0;
                 sh = 1.0 - smoothstep(top - 40.0, top + 40.0, pl.y + tc * li.L.y);
             }
             // (and the sky itself shut out close under it, whatever the sun)
@@ -1737,7 +1747,7 @@ fn tsunami(in: StageIn) -> vec4<f32> {
         // (what the water has been over, as it comes out from under it)
         let pu = dot(pl.xz, g.n);
         let tau_p = time - ts_arr(ps, pu, g.sd);
-        let reach = TS_A * ts_env(ps, pu, g) - TS_SEA - pl.y;
+        let reach = ts_a() * ts_env(ps, pu, g) - ts_sea() - pl.y;
         if (tau_p > 1.0 && reach > -3.0 && time < 41.5) {
             col = ts_wet(col, pl, rel, uv, rd, time, reach, g, li);
         }

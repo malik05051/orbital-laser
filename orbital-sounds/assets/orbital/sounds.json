@@ -3413,5 +3413,95 @@
       }
     ],
     "subtitle": "subtitles.orbital.quake.siren"
+  },
+  "quake.siren3": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/siren3",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.siren3"
+  },
+  "quake.siren3_far": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/siren3_far",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.siren3"
+  },
+  "quake.siren5": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/siren5",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.siren5"
+  },
+  "quake.siren5_far": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/siren5_far",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.siren5"
+  },
+  "quake.chime_up": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/chime_up",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.chime_up"
+  },
+  "quake.chime_up_far": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/chime_up_far",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.chime_up"
+  },
+  "quake.chime_down": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/chime_down",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.chime_down"
+  },
+  "quake.chime_down_far": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/chime_down_far",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.chime_down"
+  },
+  "quake.eew": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/eew",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.eew"
+  },
+  "quake.eew_far": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/eew_far",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.eew"
   }
 }

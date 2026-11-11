@@ -11,11 +11,11 @@ What each release of Orbital Laser added, newest first. The current release is i
   and what the land suffers (glass, block walls, wooden houses pancaked, cracks, landslides, liquefaction, fires), as
   the JMA's table has it. The strike-slip faults tear the land open and offset it along their trace; Noto's heaves the
   far side up 4 m. Those with an Earthquake Early Warning that day warn before the strong shaking. Those that raised a
-  tsunami (Tohoku, Kanto, Noto, Valdivia) raise it in real water at the coast they are aimed at: the JMA's Major Tsunami
-  Warning with NHK's alert tone and J-Alert sirens from siren poles along the coast, a countdown to the first wave
-  (`/orbital tsunamitime`), the sea withdrawing, then a train of waves flooding the low land and washing wooden houses
-  away, the coast's gauge over the hotbar, and everything put back as it ends. Its pass raises dust. Fork only for now
-  (greyed out natively).
+  tsunami (Tohoku, Kanto, Noto, Valdivia) warn as the JMA does, with a countdown to the first wave (`/orbital
+  tsunamitime`); the sea withdraws for real, then the wave comes as the Tsunami strike's own, at the quake's size (about
+  12 m for Tohoku). J-Alert siren poles along the coast sound Japan's disaster-prevention radio in the JMA's siren
+  patterns, each pole its own station, near and far (`/orbital sirenvolume`). `/orbital quake custom MAGNITUDE DEPTH
+  [SHINDO]` for your own earthquake. The whole picture sways with the shaking. Fork only for now (greyed out natively).
 
 ## 0.5.14
 

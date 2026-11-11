@@ -62,13 +62,21 @@ pub fn sea_time(q: &Quake, countdown: f64) -> Option<SeaTime> {
     let warn = t0 + f64::from(q.t_main()) + 0.6 * f64::from(q.main_dur());
     let shaken = t0 + q.pulses.iter().filter(|p| p.1 >= 0.4).map(|p| f64::from(p.0 + p.2)).fold(0.0, f64::max);
     let arrive = (warn + countdown.clamp(10.0, QT_COUNTDOWN_MAX)).max(shaken + 12.0);
-    let draw = arrive - (0.5 * (arrive - warn)).clamp(8.0, 22.0);
-    let last = ts.waves.iter().map(|w| f64::from(w.0 + w.2 + w.3 + w.4)).fold(0.0, f64::max);
-    Some(SeaTime { warn, draw, arrive, end: arrive + last + 14.0 })
+    let draw = arrive - (0.5 * (arrive - warn)).clamp(14.0, 26.0);
+    let _ = ts;
+    // (the quake's strike ends here and the Tsunami's takes over, its wave reaching the coast TS_T later: `HandOff`)
+    Some(SeaTime { warn, draw, arrive, end: arrive - super::tsunami::TS_T })
 }
-/// The strike's whole length for preset `q` and the countdown: its shaking, or with a tsunami until the sea is back.
+/// The strike's whole length for preset `q` and the countdown: its shaking, or with a tsunami until it hands over to the
+/// Tsunami's strike (`HandOff`).
 pub fn qk_length(q: &Quake, countdown: f64) -> f32 {
-    sea_time(q, countdown).map_or(q.length, |s| (s.end + 4.0) as f32)
+    sea_time(q, countdown).map_or(q.length, |s| (s.end + 0.5) as f32)
+}
+
+/// How big the Tsunami's wave is drawn for this tsunami: its highest wave over the Tsunami's own ~145 at the coast.
+pub fn wave_k(ts: &Tsu) -> f64 {
+    let h = ts.waves.iter().map(|w| f64::from(w.1)).fold(0.0, f64::max);
+    (h / 145.0).clamp(0.02, 1.0)
 }
 
 /// The sea's level at the coast over its own (blocks; below 0 drawn back) at strike second `t`.
@@ -342,15 +350,16 @@ pub fn warning(ts: &Tsu) -> (&'static str, u32) {
     }
 }
 
-/// Where the coast's J-Alert siren poles stand (x, z): four along it, a little inland of the target's line, the one
-/// nearest the player first.
+/// Where the coast's J-Alert siren poles stand (x, z): four along it a little inland of the target's line, two far off
+/// along it, the one nearest the player first.
 pub fn siren_sites(geo: &QkGeo, me: [f64; 3]) -> Vec<[f64; 2]> {
-    let mut out: Vec<[f64; 2]> = [-120.0, -40.0, 40.0, 120.0]
+    // (four along the coast near the target, and two more a long way off along it, inland: the next towns')
+    let mut out: Vec<[f64; 2]> = [(-120.0, 0.0), (-40.0, 0.0), (40.0, 0.0), (120.0, 0.0), (-300.0, 120.0), (330.0, 160.0)]
         .iter()
         .enumerate()
-        .map(|(k, &u)| {
+        .map(|(k, &(u, inland))| {
             let u = u + (super::mh(k as u32, geo.seed, 0x51e) - 0.5) * 30.0;
-            let d = 26.0 + super::mh(k as u32, geo.seed, 0x51f) * 14.0;
+            let d = 26.0 + inland + super::mh(k as u32, geo.seed, 0x51f) * 14.0;
             [(geo.t[0] + u * geo.st[0] + d * geo.nm[0]).floor() + 0.5, (geo.t[2] + u * geo.st[1] + d * geo.nm[1]).floor() + 0.5]
         })
         .collect();
@@ -380,6 +389,135 @@ pub fn siren_pole(x: i32, z: i32) -> Blocks {
     b
 }
 
+/// What a quake that raised a tsunami hands over to the Tsunami strike lib.rs fires at its target as it ends: the sea it
+/// drew back (put back as the wave reaches the coast, or if the Tsunami is stopped), the wave's size, the warning, the
+/// siren poles and their volume.
+pub struct HandOff {
+    pub flood: Option<Rc<RefCell<Flood>>>,
+    pub k: f64,
+    pub kind: &'static str,
+    pub color: u32,
+    pub expect: &'static str,
+    pub major: bool,
+    pub poles: Vec<[f64; 2]>,
+    pub siren: f32,
+    pub seed: u32,
+}
+thread_local! {
+    static PENDING: RefCell<Option<HandOff>> = const { RefCell::new(None) };
+    static ACTIVE: RefCell<Option<HandOff>> = const { RefCell::new(None) };
+}
+/// The quake's plan leaves its hand-over here; lib.rs takes it as the quake ends (and drops it on a stop).
+pub fn set_pending(h: HandOff) {
+    PENDING.with(|p| *p.borrow_mut() = Some(h));
+}
+pub fn take_pending() -> Option<HandOff> {
+    PENDING.with(|p| p.borrow_mut().take())
+}
+/// lib.rs makes it the next Tsunami's (`tsunami_plan` takes it).
+pub fn activate(h: HandOff) {
+    ACTIVE.with(|p| *p.borrow_mut() = Some(h));
+}
+pub fn take_active() -> Option<HandOff> {
+    ACTIVE.with(|p| p.borrow_mut().take())
+}
+
+/// The coast's disaster-prevention radio, from its poles: each broadcast a chime, then the siren in the JMA's pattern
+/// (a Major Tsunami Warning's 3 s on and 2 s off six times, a Tsunami Warning's 5 s on and 6 s off four), a closing
+/// chime, a pause, again, from `from` to `until`. Every pole is its own station: started a few seconds apart from the
+/// next (each town's set off on its own), heard late by its distance (at 343 a second) and fainter, the far ones
+/// muffled and echoing (`_far`), so near the coast one wails loud and others answer from further off. `vol` the player's
+/// siren volume (1 as made); none at all at 0.
+#[allow(clippy::too_many_arguments)]
+pub fn sirens(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], from: f64, until: f64, major: bool, vol: f32, seed: u32) {
+    if vol <= 0.0 {
+        return;
+    }
+    let (blast, every, n) = if major { ("siren3", 5.0, 6) } else { ("siren5", 11.0, 4) };
+    let cycle = 4.5 + every * f64::from(n) + 2.5 + 9.0;
+    for (k, &[x, z]) in poles.iter().enumerate() {
+        let d = (x - me[0]).hypot(z - me[2]);
+        let far = if d > 140.0 { "_far" } else { "" };
+        let late = super::mh(k as u32, seed, 0x5a1) * 5.0 + d / 343.0;
+        let at = Some([x, y + 9.0, z]);
+        // (heard as far as 16 blocks a unit of volume: some 260 at the player's 100%)
+        let v = 16.0 * vol;
+        let push = |p: &mut Plan, t: f64, ev: &str| {
+            if t >= from && t < until + 6.0 {
+                p.ev.push((t as f32, Act::Sound { event: format!("orbital:quake.{ev}{far}"), at, volume: v, pitch: 1.0 }));
+            }
+        };
+        let mut c = from + late;
+        while c < until {
+            push(p, c, "chime_up");
+            for i in 0..n {
+                push(p, c + 4.5 + every * f64::from(i), blast);
+            }
+            push(p, c + 4.5 + every * f64::from(n), "chime_down");
+            c += cycle;
+        }
+    }
+    // (and further off still, past the poles: the player's own recording of a coast's sirens, if they put one in, faint)
+    let mut t = from + 6.0;
+    while t < until {
+        p.ev.push((t as f32, Act::Sound { event: "orbital:quake.siren".into(), at: None, volume: (0.12 * vol).min(1.0), pitch: 1.0 }));
+        t += 16.0;
+    }
+}
+
+/// The disaster-prevention radio's earthquake alert from the poles at `t`, a broadcast a pole as `sirens` has them.
+pub fn eew_alert(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], t: f64, vol: f32, seed: u32) {
+    if vol <= 0.0 {
+        return;
+    }
+    for (k, &[x, z]) in poles.iter().enumerate() {
+        let d = (x - me[0]).hypot(z - me[2]);
+        let far = if d > 140.0 { "_far" } else { "" };
+        let late = super::mh(k as u32, seed, 0x5a2) * 1.5 + d / 343.0;
+        for r in 0..2 {
+            p.ev.push(((t + late + 2.8 * f64::from(r)) as f32, Act::Sound { event: format!("orbital:quake.eew{far}"), at: Some([x, y + 9.0, z]), volume: 16.0 * vol, pitch: 1.0 }));
+        }
+    }
+}
+
+/// The Tsunami's strike for a quake's tsunami (`tsunami_plan` calls it with what the quake handed over): the sea the
+/// quake drew back put back as the wave reaches the coast (and if it is stopped); the sirens going on until the wave
+/// has come and gone; a title as it arrives; over the hotbar the warning and the coast's gauge, the water's height at
+/// the target over its ground as the wave's model has it.
+pub fn qk_tsunami_extras(p: &mut Plan, geo: &super::tsunami::TsGeo, h: HandOff, me: [f64; 3]) {
+    let tt = super::tsunami::TS_T;
+    if let Some(f) = &h.flood {
+        const PARTS: usize = 24;
+        for part in 0..PARTS {
+            let f2 = f.clone();
+            let at = tt as f32 + 0.05 * part as f32;
+            p.later(at, move |q| sea_restore(q, &f2, part, PARTS, at));
+            if let Some((t, Act::Later(job))) = p.ev.pop() {
+                p.ev.push((t, Act::Cleanup(job)));
+            }
+        }
+    }
+    sirens(p, &h.poles, geo.t[1], me, 0.0, tt + 24.0, h.major, h.siren, h.seed);
+    let t0 = (tt - 1.5) as f32;
+    p.at(t0, "title @s times 5 60 20");
+    p.at(t0, format!(r##"title @s subtitle {{"text":"Expected {}  ·  get to high ground","color":"#{:06X}"}}"##, h.expect, h.color));
+    p.at(t0, format!(r##"title @s title {{"text":"TSUNAMI ARRIVING","color":"#{:06X}","bold":true}}"##, h.color));
+    let mut top = 0.0f64;
+    for k in 0..40 {
+        let t = f64::from(k);
+        let obs = geo.level(0.0, 0.0, t).unwrap_or(-1.0);
+        top = top.max(obs);
+        let text = if t < tt {
+            format!("{}  ·  expected {}  ·  the wave reaches the coast in {}", h.kind, h.expect, mmss(tt - t))
+        } else if obs > 0.0 {
+            format!("{}  ·  observed {obs:+.1} m at the coast  ·  highest so far {top:.1} m", h.kind)
+        } else {
+            format!("TSUNAMI  ·  highest observed {top:.1} m  ·  more waves may come: stay on high ground")
+        };
+        p.ev.push((t as f32, Act::Cmd(format!(r##"title @s actionbar {{"text":"{text}","color":"#{:06X}","bold":true}}"##, h.color))));
+    }
+}
+
 /// Seconds as m:ss.
 pub fn mmss(s: f64) -> String {
     let s = s.max(0.0).ceil() as i64;
@@ -407,13 +545,16 @@ mod tests {
         for q in QK_PRESETS.iter().filter(|q| q.tsunami.is_some()) {
             let ts = q.tsunami.as_ref().unwrap();
             let st = sea_time(q, 60.0).unwrap();
-            assert!(st.warn < st.draw && st.draw < st.arrive && st.arrive < st.end, "{}", q.key);
+            assert!(st.warn < st.draw && st.draw < st.end && st.end < st.arrive, "{}", q.key);
             assert_eq!(sea_s(ts, &st, st.draw - 0.1), 0.0);
             assert!(sea_s(ts, &st, st.arrive - 0.5) < -0.8 * ts.draw, "{}: the sea drawn back before the first wave", q.key);
             let top = ts.waves.iter().map(|w| f64::from(w.1)).fold(0.0, f64::max);
-            let seen = observed_max(ts, &st, st.end);
+            let after = st.arrive + ts.waves.iter().map(|w| f64::from(w.0 + w.2 + w.3 + w.4)).fold(0.0, f64::max) + 14.0;
+            let seen = observed_max(ts, &st, after);
             assert!((seen - top).abs() < 0.6, "{}: its highest wave at the coast ({seen} of {top})", q.key);
-            assert!(sea_s(ts, &st, st.end).abs() < 0.05, "{}: back to its own level at the end", q.key);
+            assert!(sea_s(ts, &st, after).abs() < 0.05, "{}: back to its own level after its last wave", q.key);
+            assert!(st.end < st.arrive && st.draw + 4.0 < st.end, "{}: the quake hands over with the sea drawn back", q.key);
+            assert!(sea_s(ts, &st, st.end) < -0.5 * ts.draw, "{}", q.key);
             // (inland: later, lower, and nothing past its reach)
             let peak = |x: f64| (0..2000).map(|k| level(ts, &st, x, st.arrive + f64::from(k) * 0.1)).fold(f64::MIN, f64::max);
             assert!(peak(60.0) < peak(0.0) && peak(ts.reach + 5.0) <= 1e-9, "{}", q.key);
@@ -464,7 +605,8 @@ mod tests {
         let mut t = st.draw - 1.0;
         let mut drawn = false;
         let mut flooded = false;
-        while t < st.end + 1.0 {
+        let horizon = st.arrive + 130.0;
+        while t < horizon {
             {
                 let mut fb = f.borrow_mut();
                 for k in 0..fb.chunks.len() {
@@ -480,7 +622,7 @@ mod tests {
         assert!(drawn, "the sea drew back");
         assert!(flooded, "the low land flooded");
         assert!(f.borrow().washed > 0, "a wooden house in deep water washed away");
-        assert!(sea_s(ts, &st, st.end + 1.0).abs() < 0.05);
+        assert!(sea_s(ts, &st, horizon).abs() < 0.05);
         let fb = f.borrow();
         assert!(fb.chunks.iter().all(|c| c.cols.iter().all(|c| c.cur == c.orig)), "all back where it was at the end");
         // (only air filled, only water taken out)
