@@ -485,7 +485,8 @@ fn shot(kv: &HashMap<String, f32>) -> Shot {
     u.extend_from_slice(&[near, far, 512.0, fov]);
     u.extend_from_slice(&[tgt[0], tgt[1], tgt[2], time]);
     u.extend_from_slice(&[tgt[0].floor() + 0.5, tgt[2].floor() + 0.5, wing, laser]);
-    u.extend_from_slice(&[g("seed", 37.0), 1.0, 0.0, (tgt[1] - 1.0e-3).floor()]);
+    // ([2].z: the Tsunami's size, `--set tsk=0.1` an Earthquake's)
+    u.extend_from_slice(&[g("seed", 37.0), 1.0, g("tsk", 0.0), (tgt[1] - 1.0e-3).floor()]);
     // (strike.rs's df_reach)
     let reach = (360.0 - ((me[0] - tgt[0]).powi(2) + (me[1] - tgt[2]).powi(2)).sqrt()).max(40.0);
     if quake {

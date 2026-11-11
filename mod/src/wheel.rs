@@ -11,7 +11,7 @@
 //! field to type one in. Drawn by the game from the
 //! shapes built here; GUI pixels, from the centre of the screen.
 use crate::lasers::{LASERS, Laser, is_ship};
-use crate::strike::{APPROACHES, ARRIVALS, COLOUR_RGB, COLOURS, Choice, FD_PATTERNS, QK_PRESETS};
+use crate::strike::{APPROACHES, ARRIVALS, COLOUR_RGB, COLOURS, Choice, FD_PATTERNS, QK_CUSTOM, qk_quake};
 use horizon_mod_sdk::ui::{Draw, Point, Rect};
 use std::f32::consts::{PI, TAU};
 
@@ -81,10 +81,10 @@ fn crease_button(k: usize) -> Rect {
 /// name.
 const QUAKE_LABEL_W: f32 = 38.0;
 fn quake_w(k: usize) -> f32 {
-    8.0 + 6.0 * QK_PRESETS[k].button.len() as f32
+    8.0 + 6.0 * qk_quake(k).button.len() as f32
 }
 fn quake_button(k: usize) -> Rect {
-    let n = QK_PRESETS.len();
+    let n = QK_CUSTOM + 1;
     let w = QUAKE_LABEL_W + (0..n).map(quake_w).sum::<f32>() + BTN_GAP * (n - 1) as f32;
     let x = -w / 2.0 + QUAKE_LABEL_W + (0..k).map(quake_w).sum::<f32>() + BTN_GAP * k as f32;
     Rect { x, y: ROW_Y, w: quake_w(k), h: BTN_H }
@@ -352,7 +352,7 @@ pub fn spot(x: f32, y: f32, rows: impl Into<Rows>, page: usize) -> Option<Spot> 
         }
     }
     if rows == Rows::Quake {
-        for k in 0..QK_PRESETS.len() {
+        for k in 0..=QK_CUSTOM {
             if inside(&quake_button(k), x, y) {
                 return Some(Spot::Quake(k));
             }
@@ -652,7 +652,8 @@ impl Wheel {
             let ms = LASERS[rl];
             let b0 = quake_button(0);
             text(&mut out, "QUAKE", b0.x - QUAKE_LABEL_W / 2.0 - 2.0, b0.y + 2.0, 0xB8BEC8);
-            for (k, p) in QK_PRESETS.iter().enumerate() {
+            for k in 0..=QK_CUSTOM {
+                let p = qk_quake(k);
                 let b = quake_button(k);
                 let chosen = k == quake;
                 let hovered = self.hover == Some(Spot::Quake(k));
@@ -708,8 +709,8 @@ impl Wheel {
             Some(Spot::Impact(_)) => ("Cinematic: a white-out and a shockwave ring".to_string(), 0x8C93A0),
             Some(Spot::Crease(k)) => (FD_PATTERNS[k.min(2)].2.to_string(), 0x8C93A0),
             Some(Spot::Quake(k)) => {
-                let q = &QK_PRESETS[k.min(QK_PRESETS.len() - 1)];
-                (format!("{}, Mw {:.1}, Shindo {}{}{}", q.name, q.mw, q.top_class(), if q.estimated { " est." } else { "" }, if q.tsunami { ", tsunami" } else { "" }), 0x8C93A0)
+                let q = qk_quake(k.min(QK_CUSTOM));
+                (format!("{}, Mw {:.1}, Shindo {}{}{}", q.name, q.mw, q.top_class(), if q.estimated { " est." } else { "" }, if q.tsunami.is_some() { ", tsunami" } else { "" }), 0x8C93A0)
             }
             Some(Spot::Knock) => ("The Nuke's and the Rod's push on you on or off".to_string(), 0x8C93A0),
             Some(Spot::Follow) => ("Camera chases the Nuke's or Payload's bomb down".to_string(), 0x8C93A0),
@@ -837,7 +838,7 @@ mod tests {
         let eq = LASERS.iter().position(|l| l.key == "earthquake").expect("the Earthquake");
         assert_eq!((eq, page_of(eq)), (19, 3));
         // (its QUAKE row's buttons side by side, none over another)
-        for k in 1..QK_PRESETS.len() {
+        for k in 1..=QK_CUSTOM {
             assert!(quake_button(k - 1).x + quake_button(k - 1).w < quake_button(k).x);
         }
         assert_eq!(tab(3).x + tab(3).w, -tab(0).x, "the four tabs centred over the ring");

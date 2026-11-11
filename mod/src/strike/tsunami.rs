@@ -73,6 +73,19 @@ pub(crate) struct TsGeo {
     pub dp: f64,
     pub send: f64,
     pub sd: f32,
+    /// Its size, 1 the Tsunami's own: an Earthquake's tsunami is the same wave a tenth as high or so (`ts_set_scale`;
+    /// the pass's ts_k). Its heights go by it; its speed, its face's length and its reach stay.
+    pub k: f64,
+}
+thread_local! {
+    static SCALE: std::cell::Cell<f64> = const { std::cell::Cell::new(1.0) };
+}
+/// The size of the Tsunamis planned from now on (lib.rs's `fire_at`: 1 for the Tsunami itself).
+pub fn ts_set_scale(k: f64) {
+    SCALE.with(|s| s.set(if k > 0.0 && k < 1.0 { k } else { 1.0 }));
+}
+pub fn ts_scale() -> f64 {
+    SCALE.with(std::cell::Cell::get)
 }
 impl TsGeo {
     pub fn new(target: &Target, me: [f64; 3], shader_seed: f32) -> TsGeo {
@@ -81,7 +94,7 @@ impl TsGeo {
         let a = f64::from(wing_angle(target.point, me));
         let m = [a.cos(), a.sin()];
         let dp = (me[0] - tx).hypot(me[2] - tz);
-        TsGeo { t: [tx, f64::from(by) + 1.0, tz], m, n: [-m[1], m[0]], dp, send: (dp + 160.0).min(720.0), sd: (shader_seed * 0.618_034).fract() * 40.0 }
+        TsGeo { t: [tx, f64::from(by) + 1.0, tz], m, n: [-m[1], m[0]], dp, send: (dp + 160.0).min(720.0), sd: (shader_seed * 0.618_034).fract() * 40.0, k: ts_scale() }
     }
     /// (s, u) of the world point (x, z): out along the wave's way from the target, and across it.
     pub fn su(&self, x: f64, z: f64) -> (f64, f64) {
@@ -146,7 +159,7 @@ impl TsGeo {
     }
     /// The level the water holds at (s, u), over the target's ground (a column's ground is `g - t[1]` over it).
     pub fn peak(&self, s: f64, u: f64) -> f64 {
-        TS_A * self.env(s, u) - TS_SEA
+        self.k * (TS_A * self.env(s, u) - TS_SEA)
     }
     /// The surface's height over the target's ground at (s, u) at `t`, none where there is no water.
     pub fn level(&self, s: f64, u: f64, t: f64) -> Option<f64> {
@@ -156,7 +169,7 @@ impl TsGeo {
         }
         let p = Self::prof(t - self.arr(s, u), s);
         let x = self.drained(t, s);
-        (p > 0.0 && x < 1.0).then(|| Self::fall(TS_A * env * p - TS_SEA, x))
+        (p > 0.0 && x < 1.0).then(|| self.k * Self::fall(TS_A * env * p - TS_SEA, x))
     }
     /// Where the middle of the front is at `t` (the inverse of tau).
     pub fn front(t: f64) -> f64 {
@@ -537,6 +550,8 @@ fn ponds(land: &[Land], n: usize) -> Vec<(usize, i16)> {
 }
 /// When the water falls past `y` over the target's ground at `s` (it stands there till then), or none if it never covers it.
 fn falls_past(geo: &TsGeo, s: f64, y: f64) -> Option<f64> {
+    // (in the full-size wave's heights: a smaller one's are all `k` of them)
+    let y = y / geo.k;
     let top = TS_A * geo.env(s, 0.0) * (1.0 - TS_LOW) - TS_SEA;
     if top < y {
         return None;
@@ -995,6 +1010,10 @@ pub(super) fn tsunami_plan(laser: &'static Laser, target: &Target, terrain: bool
     let s = shader_seed as u32;
     let geo = TsGeo::new(target, me, shader_seed);
     let dp = geo.dp;
+    // (an Earthquake's tsunami: what the quake handed over, strike/qk_sea.rs)
+    if let Some(h) = super::qk_sea::take_active() {
+        super::qk_sea::qk_tsunami_extras(&mut p, &geo, h, me);
+    }
     let len = laser.length;
 
     // ---- the pass's table (what it reads: none yet but the terrain flag) --------------------------------------------

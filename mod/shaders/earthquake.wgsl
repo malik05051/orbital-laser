@@ -4,10 +4,9 @@
 
 // ---- laser 19: the earthquake -------------------------------------------------------------------------------------
 // No beam, nothing from the sky: a historic earthquake (strike/quake.rs's QK_PRESETS) on the land round the target. The
-// game's own camera shakes (the plan's jolts); here the land itself rolls as the waves pass under it, hardest where the
-// Shindo is highest and while the shaking is there (`qk_env`), the long slow swell of a great megathrust, the quick
-// jolts of a shallow fault; dust kicks up along the trace as the rupture runs out along it, and boils up in patches over
-// the land where it shook at 6- and over, from the houses that fell and the slopes that slid, drifting and settling.
+// game's own camera shakes (the plan's jolts); this pass never moves the picture. Dust kicks up along the trace as the
+// rupture runs out along it, and boils up in patches over the land where it shook at 6- and over, from the houses that
+// fell and the slopes that slid, drifting and settling. A tsunami's water is real water blocks (strike/qk_sea.rs).
 // Everything here is strike/quake.rs's model: keep QK_*, qk_preset and qk_pulse in step with QK_PRESETS and QkGeo.
 //
 // frame.mod_params: [1].z the fault's strike (radians), [3].xyz the player as it fired, [3].w the preset.
@@ -27,7 +26,7 @@ struct QkP {
     half: f32,
     hypo: f32,
     n: i32,             // its pulses (qk_pulse)
-    len: f32,           // the strike's seconds
+    len: f32,           // the shaking's seconds (the dust gone by then; a tsunami runs on with no pass to draw)
 };
 fn qk_preset(i: i32) -> QkP {
     switch i {
@@ -258,31 +257,30 @@ fn earthquake(in: StageIn) -> vec4<f32> {
     let day = saturate(sun.y * 2.5 + 0.35);
     let fade = 1.0 - smoothstep(P.len - 6.0, P.len, t);
 
-    let d0 = depth_at(uv);
-    let sky0 = is_sky(d0);
-    let rel0 = world_offset(uv, select(d0, 0.5, sky0));
-
-    // ---- the land rolls: each point of it heaved up and down as the waves go under it --------------------------------
+    // ---- the shaking: the whole picture moved together, as a camera held in shaking hands (never a pixel by where it
+    // is in the world: that tore the land into doubled, smeared bands at every edge in depth). How hard is where the
+    // camera is, by its Shindo and the shaking there now (qk_env, the plan's own model); a great quake's long, slow
+    // rolling heaves, a shallow one's quick, hard jolts, a rattle over both. Zoomed in a little so no edge shows. ----
     var uv2 = uv;
-    if (!sky0 && t > QK_T0) {
-        let w = rel0 + cam;
-        let q = w.xz - F.t;
-        let u = dot(q, F.st);
-        let d = dot(q, F.nm);
-        let amp = qk_shake(qk_ii(P, u, d)) * qk_env(i, P, u, d, t) * k * fade;
-        if (amp > 0.002) {
-            // (a great quake's long swell, a shallow one's short, quick waves)
-            let lam = mix(28.0, 90.0, smoothstep(7.0, 9.0, P.mw));
-            let c = lam * mix(1.6, 0.55, smoothstep(7.0, 9.0, P.mw));
-            let r = qk_rh(P, u, d);
-            let ph = 6.2831853 * (r / lam - t * c / lam);
-            let lift = amp * (0.22 + 0.25 * smoothstep(7.5, 9.0, P.mw)) * sin(ph + 0.6 * sin(u * 0.02 + seed_v()));
-            let near = 1.0 / (1.0 + length(rel0) / 260.0);
-            let a = project_rel(rel0);
-            let b = project_rel(rel0 + vec3<f32>(0.0, lift * near * 4.0, 0.0));
-            if (a.z > 0.0 && b.z > 0.0) {
-                uv2 = clamp(uv - (b.xy - a.xy), vec2<f32>(0.002), vec2<f32>(0.998));
-            }
+    if (t > QK_T0 && fade > 0.001) {
+        let q = cam.xz - F.t;
+        let cu = dot(q, F.st);
+        let cd = dot(q, F.nm);
+        let a = qk_shake(qk_ii(P, cu, cd)) * qk_env(i, P, cu, cd, t) * k * fade;
+        if (a > 0.001) {
+            let great = smoothstep(7.6, 8.8, P.mw);
+            let s0 = seed_v() * 1.7;
+            let fr = mix(2.7, 0.75, great);
+            let roll = vec2<f32>(sin(t * fr * 6.2832 + s0) + 0.45 * sin(t * fr * 2.31 * 6.2832 + s0 * 2.0), cos(t * fr * 0.83 * 6.2832 + s0 * 3.0) + 0.4 * sin(t * fr * 1.73 * 6.2832 + s0));
+            let jolt = vec2<f32>(fbm(vec2<f32>(t * 7.0, s0)) - 0.5, fbm(vec2<f32>(s0, t * 7.3)) - 0.5) * 2.0;
+            let rattle = vec2<f32>(sin(t * 61.0 + s0), sin(t * 53.0 + s0 * 1.3));
+            let off = (roll * mix(0.55, 0.85, great) + jolt * mix(0.6, 0.25, great) + rattle * 0.06) * a * 0.016;
+            let rot = (sin(t * fr * 1.1 * 6.2832 + s0 * 5.0) * mix(0.25, 0.5, great) + (fbm(vec2<f32>(t * 5.0, s0 + 3.0)) - 0.5)) * a * 0.012;
+            let zoom = 1.0 + a * 0.05;
+            let aspect = frame.resolution.x / frame.resolution.y;
+            var c = (uv - vec2<f32>(0.5)) * vec2<f32>(aspect, 1.0) / zoom;
+            c = vec2<f32>(c.x * cos(rot) - c.y * sin(rot), c.x * sin(rot) + c.y * cos(rot));
+            uv2 = clamp(c / vec2<f32>(aspect, 1.0) + vec2<f32>(0.5) + off, vec2<f32>(0.001), vec2<f32>(0.999));
         }
     }
     var col = srgb_to_linear(textureSampleLevel(scene_color, linear_sampler, uv2, 0.0).rgb);
