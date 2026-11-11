@@ -27,9 +27,9 @@ from PIL import Image, ImageDraw
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SHADERS = ROOT / "mod" / "shaders"
-LASERS = ["plasma", "godly", "blackhole", "meteor", "mothership", "downfall", "planetkiller", "crystalbloom", "sinkhole", "payload", "nuke", "rod", "supercell", "hurricane", "tsunami", "fold", "supervolcano", "skybreak", "carpetbomb"]
+LASERS = ["plasma", "godly", "blackhole", "meteor", "mothership", "downfall", "planetkiller", "crystalbloom", "sinkhole", "payload", "nuke", "rod", "supercell", "hurricane", "tsunami", "fold", "supervolcano", "skybreak", "carpetbomb", "earthquake"]
 # the shader's laser number where it is not the list's place (lasers.rs's index)
-INDEX = {"supercell": 12, "hurricane": 13, "fold": 14, "supervolcano": 15, "tsunami": 16, "skybreak": 17, "carpetbomb": 18}
+INDEX = {"supercell": 12, "hurricane": 13, "fold": 14, "supervolcano": 15, "tsunami": 16, "skybreak": 17, "carpetbomb": 18, "earthquake": 19}
 # the shader's file where it is not the laser's name
 SHADER = {"supervolcano": "volcano"}
 # Where the eye is (the target is at 0.5 65 0.5, the player 60 blocks south of it, so the ships lie away north)
@@ -42,6 +42,10 @@ VIEWS = {
     "side": "cx=1700 cy=200 cz=-250 yaw=180 pitch=6 mx=0 mz=60",
     "under": "cx=0 cy=72 cz=-250 yaw=-90 pitch=80 mx=0 mz=60",
     "aerial": "cx=0 cy=900 cz=1100 yaw=-90 pitch=-32 mx=0 mz=60",
+    # the earthquake: from the player's side looking across the fault at the target, from high over it, and along it
+    "qkplayer": "cx=0 cy=74 cz=90 lx=0 ly=64 lz=-60 mx=0 mz=90",
+    "qkhigh": "cx=40 cy=200 cz=240 lx=0 ly=64 lz=-20 mx=0 mz=90",
+    "qkalong": "cx=230 cy=82 cz=30 lx=0 ly=66 lz=0 mx=0 mz=90",
     # the planet killer's first tower, a few hundred blocks off it (it stands beyond the target from the player)
     "tower": "cx=180 cy=80 cz=-420 lx=0 ly=170 lz=-1150 mx=0 mz=60",
     # and close under it, its crown and its seams
@@ -406,7 +410,8 @@ DEFAULT_VIEWS = {"downfall": "player,far,side", "mothership": "player,far", "pla
                  "tsunami": "tsplayer,tsside,tsaerial",
                  "fold": "flhill,flhigh",
                  "skybreak": "sbplayer,sbfar,sbaerial",
-                 "carpetbomb": "cpplayer,cpside,cpaerial"}
+                 "carpetbomb": "cpplayer,cpside,cpaerial",
+                 "earthquake": "qkplayer,qkhigh,qkalong"}
 
 
 def build_pass(laser: str, out: pathlib.Path, fast: bool = False, sets: tuple = ()) -> pathlib.Path:
@@ -415,7 +420,7 @@ def build_pass(laser: str, out: pathlib.Path, fast: bool = False, sets: tuple = 
     half-size stage (`[half stage]`) kept only for QUALITY FAST (`fast`)."""
     path = out / ("pass-fast.wgsl" if fast else "pass.wgsl")
     strike = (SHADERS / "strike.wgsl").read_text()
-    if laser in ("downfall", "planetkiller", "crystalbloom", "sinkhole", "payload", "nuke", "rod", "supercell", "hurricane", "tsunami", "fold", "supervolcano", "skybreak", "carpetbomb"):
+    if laser in ("downfall", "planetkiller", "crystalbloom", "sinkhole", "payload", "nuke", "rod", "supercell", "hurricane", "tsunami", "fold", "supervolcano", "skybreak", "carpetbomb", "earthquake"):
         own = (SHADERS / f"{SHADER.get(laser, laser)}.wgsl").read_text()
         # (less the Mothership's ship unless the laser's own says it uses it: mod/src/passbuild.rs)
         ship = [] if "// [uses the mothership]" in own else ["-e", r"/^\/\/ \[mothership\]/,/^\/\/ \[end mothership\]/d"]

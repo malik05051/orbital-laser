@@ -469,13 +469,32 @@ CARPETBOMB_ICON = [      # the carpet bomb: a contrail high up, the stick's bomb
     "JJJJJJJJJJJJJJJJ",
 ]
 
-GRIDS = {"carpetbomb_icon": CARPETBOMB_ICON, "supervolcano_icon": SUPERVOLCANO_ICON, "skybreak_icon": SKYBREAK_ICON, "tsunami_icon": TSUNAMI_ICON, "hurricane_icon": HURRICANE_ICON, "supercell_icon": SUPERCELL_ICON, "rod_icon": ROD_ICON, "nuke_icon": NUKE_ICON, "payload_icon": PAYLOAD_ICON, "sinkhole_icon": SINKHOLE_ICON, "plasma_icon": PLASMA_ICON, "godly_icon": GODLY_ICON, "blackhole_icon": BLACKHOLE_ICON,
+EARTHQUAKE_ICON = [      # the earthquake: a seismogram's burst over the land torn and offset along a fault
+    "................",
+    ".......r........",
+    ".......r....r...",
+    "......r.r...r...",
+    "..r..r..r..r.r..",
+    "rr.rr...r.r...rr",
+    ".........r......",
+    "................",
+    "tttttttk........",
+    "jjjjjjjkk.......",
+    "jjJjjjjjk.tttttt",
+    "jjjjjJjjkkjjjjjj",
+    "JjjjjjjjjkjjJjjj",
+    "llljlllllkkjjjjj",
+    "lLlllLlllLklllll",
+    "lllllllllllkLlll",
+]
+
+GRIDS = {"earthquake_icon": EARTHQUAKE_ICON, "carpetbomb_icon": CARPETBOMB_ICON, "supervolcano_icon": SUPERVOLCANO_ICON, "skybreak_icon": SKYBREAK_ICON, "tsunami_icon": TSUNAMI_ICON, "hurricane_icon": HURRICANE_ICON, "supercell_icon": SUPERCELL_ICON, "rod_icon": ROD_ICON, "nuke_icon": NUKE_ICON, "payload_icon": PAYLOAD_ICON, "sinkhole_icon": SINKHOLE_ICON, "plasma_icon": PLASMA_ICON, "godly_icon": GODLY_ICON, "blackhole_icon": BLACKHOLE_ICON,
          "downfall_icon": DOWNFALL_ICON, "crystalbloom_icon": CRYSTALBLOOM_ICON}
 DRAWN = {"laser_designator": designator, "meteor_icon": meteor_icon, "mothership_icon": mothership_icon,
          "planetkiller_icon": planetkiller_icon}
 
 names = ("laser_designator", "plasma_icon", "godly_icon", "blackhole_icon", "meteor_icon", "mothership_icon", "downfall_icon",
-         "planetkiller_icon", "crystalbloom_icon", "sinkhole_icon", "payload_icon", "nuke_icon", "rod_icon", "supercell_icon", "hurricane_icon", "tsunami_icon", "supervolcano_icon", "skybreak_icon", "carpetbomb_icon")
+         "planetkiller_icon", "crystalbloom_icon", "sinkhole_icon", "payload_icon", "nuke_icon", "rod_icon", "supercell_icon", "hurricane_icon", "tsunami_icon", "supervolcano_icon", "skybreak_icon", "carpetbomb_icon", "earthquake_icon")
 sheet = Image.new("RGBA", (20 * len(names) - 4, 16), (0, 0, 0, 0))
 for i, name in enumerate(names):
     if name in GRIDS:

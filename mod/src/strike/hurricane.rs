@@ -645,7 +645,7 @@ fn read_columns(bx: i32, bz: i32, part: i32) -> Vec<(i32, i32)> {
 /// Whether the wind leaves block `name` where it is, whatever the wind: what can't be broken (bedrock, barriers, the
 /// end portal's frame, command and structure blocks and the like) and what holds things (chests, barrels, shulker
 /// boxes, furnaces, hoppers, shelves, pots and the like: left standing with what is in them, never emptied or lost).
-fn stays(name: &str) -> bool {
+pub(super) fn stays(name: &str) -> bool {
     let n = name.trim_start_matches("minecraft:");
     const EXACT: [&str; 34] = [
         "bedrock", "barrier", "end_portal_frame", "end_portal", "end_gateway", "command_block", "chain_command_block",

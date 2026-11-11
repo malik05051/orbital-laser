@@ -11,7 +11,7 @@
 //! field to type one in. Drawn by the game from the
 //! shapes built here; GUI pixels, from the centre of the screen.
 use crate::lasers::{LASERS, Laser, is_ship};
-use crate::strike::{APPROACHES, ARRIVALS, COLOUR_RGB, COLOURS, Choice, FD_PATTERNS};
+use crate::strike::{APPROACHES, ARRIVALS, COLOUR_RGB, COLOURS, Choice, FD_PATTERNS, QK_PRESETS};
 use horizon_mod_sdk::ui::{Draw, Point, Rect};
 use std::f32::consts::{PI, TAU};
 
@@ -77,6 +77,18 @@ fn crease_button(k: usize) -> Rect {
     let x = -w / 2.0 + CREASE_LABEL_W + CREASE_W[..k].iter().sum::<f32>() + BTN_GAP * k as f32;
     Rect { x, y: ROW_Y, w: CREASE_W[k], h: BTN_H }
 }
+/// The Earthquake's preset's row: its label, then a button a historic earthquake (strike::QK_PRESETS), as wide as its
+/// name.
+const QUAKE_LABEL_W: f32 = 38.0;
+fn quake_w(k: usize) -> f32 {
+    8.0 + 6.0 * QK_PRESETS[k].button.len() as f32
+}
+fn quake_button(k: usize) -> Rect {
+    let n = QK_PRESETS.len();
+    let w = QUAKE_LABEL_W + (0..n).map(quake_w).sum::<f32>() + BTN_GAP * (n - 1) as f32;
+    let x = -w / 2.0 + QUAKE_LABEL_W + (0..k).map(quake_w).sum::<f32>() + BTN_GAP * k as f32;
+    Rect { x, y: ROW_Y, w: quake_w(k), h: BTN_H }
+}
 fn impact_button(k: usize) -> Rect {
     let w = IMPACT_LABEL_W + IMPACT_W.iter().sum::<f32>() + BTN_GAP * 3.0;
     let x = -w / 2.0 + IMPACT_LABEL_W + IMPACT_W[..k].iter().sum::<f32>() + BTN_GAP * k as f32;
@@ -104,6 +116,8 @@ pub enum Spot {
     Impact(usize),
     /// The Fold's crease pattern's row: which.
     Crease(usize),
+    /// The Earthquake's row: which historic earthquake.
+    Quake(usize),
     /// The knockback's switch, and the follow camera's.
     Knock,
     Follow,
@@ -135,6 +149,7 @@ pub enum Rows {
     Sound,
     Impact,
     Crease,
+    Quake,
 }
 impl Rows {
     /// The rows laser `i` has (if any).
@@ -145,6 +160,7 @@ impl Rows {
             Some(l) if sound_of(l.key).is_some() => Rows::Sound,
             Some(l) if l.key == "rod" => Rows::Impact,
             Some(l) if l.key == "fold" => Rows::Crease,
+            Some(l) if l.key == "earthquake" => Rows::Quake,
             _ => Rows::None,
         }
     }
@@ -335,6 +351,13 @@ pub fn spot(x: f32, y: f32, rows: impl Into<Rows>, page: usize) -> Option<Spot> 
             }
         }
     }
+    if rows == Rows::Quake {
+        for k in 0..QK_PRESETS.len() {
+            if inside(&quake_button(k), x, y) {
+                return Some(Spot::Quake(k));
+            }
+        }
+    }
     if rows == Rows::Crease {
         for k in 0..FD_PATTERNS.len() {
             if inside(&crease_button(k), x, y) {
@@ -472,7 +495,7 @@ impl Wheel {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn draws(&self, selected: usize, terrain: bool, hud: bool, approach: usize, arrival: usize, colours: &[usize], blast_alt: &[bool], fast: bool, impact: usize, pattern: usize, knock: bool, follow: bool, locked: bool, seed: Option<u32>) -> Vec<Draw> {
+    pub fn draws(&self, selected: usize, terrain: bool, hud: bool, approach: usize, arrival: usize, colours: &[usize], blast_alt: &[bool], fast: bool, impact: usize, pattern: usize, quake: usize, knock: bool, follow: bool, locked: bool, seed: Option<u32>) -> Vec<Draw> {
         let mut out = Vec::new();
         // the world dims behind the wheel
         out.push(Draw::Fill((Rect { x: -4000.0, y: -4000.0, w: 8000.0, h: 8000.0 }, 0x8C05070A)));
@@ -624,6 +647,22 @@ impl Wheel {
                 text(&mut out, p.1, b.x + b.w / 2.0, b.y + 2.0, if chosen || hovered { ms.rgb } else { 0x9AA2AE });
             }
         }
+        // (the Earthquake's: which historic earthquake, the next strike's)
+        if let Some(rl) = row.filter(|&i| LASERS[i].key == "earthquake") {
+            let ms = LASERS[rl];
+            let b0 = quake_button(0);
+            text(&mut out, "QUAKE", b0.x - QUAKE_LABEL_W / 2.0 - 2.0, b0.y + 2.0, 0xB8BEC8);
+            for (k, p) in QK_PRESETS.iter().enumerate() {
+                let b = quake_button(k);
+                let chosen = k == quake;
+                let hovered = self.hover == Some(Spot::Quake(k));
+                out.push(Draw::Fill((b, if hovered { argb(0xE6, shade(ms.rgb, 0.42)) } else { 0xE0101318 })));
+                let rim = if chosen { 2.0 } else { 1.0 };
+                let rim_c = if chosen { argb(0xFF, ms.rgb) } else { argb(0x90, shade(ms.rgb, 0.6)) };
+                out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - rim, w: b.w, h: rim }, rim_c)));
+                text(&mut out, p.button, b.x + b.w / 2.0, b.y + 2.0, if chosen || hovered { ms.rgb } else { 0x9AA2AE });
+            }
+        }
         if let Some(rl) = row.filter(|&i| is_ship(LASERS[i])) {
             let ms = LASERS[rl];
             for (r, items) in ROWS.iter().enumerate() {
@@ -668,6 +707,10 @@ impl Wheel {
             Some(Spot::Impact(2)) => ("Black Flash: red and black, black lightning".to_string(), 0x8C93A0),
             Some(Spot::Impact(_)) => ("Cinematic: a white-out and a shockwave ring".to_string(), 0x8C93A0),
             Some(Spot::Crease(k)) => (FD_PATTERNS[k.min(2)].2.to_string(), 0x8C93A0),
+            Some(Spot::Quake(k)) => {
+                let q = &QK_PRESETS[k.min(QK_PRESETS.len() - 1)];
+                (format!("{}, Mw {:.1}, Shindo {}{}{}", q.name, q.mw, q.top_class(), if q.estimated { " est." } else { "" }, if q.tsunami { ", tsunami" } else { "" }), 0x8C93A0)
+            }
             Some(Spot::Knock) => ("The Nuke's and the Rod's push on you on or off".to_string(), 0x8C93A0),
             Some(Spot::Follow) => ("Camera chases the Nuke's or Payload's bomb down".to_string(), 0x8C93A0),
             Some(Spot::SeedField) => (
@@ -791,6 +834,12 @@ mod tests {
         assert_eq!(page_of(sb), 3);
         let cp = LASERS.iter().position(|l| l.key == "carpetbomb").expect("the Carpet Bomb");
         assert_eq!((cp, page_of(cp)), (18, 3));
+        let eq = LASERS.iter().position(|l| l.key == "earthquake").expect("the Earthquake");
+        assert_eq!((eq, page_of(eq)), (19, 3));
+        // (its QUAKE row's buttons side by side, none over another)
+        for k in 1..QK_PRESETS.len() {
+            assert!(quake_button(k - 1).x + quake_button(k - 1).w < quake_button(k).x);
+        }
         assert_eq!(tab(3).x + tab(3).w, -tab(0).x, "the four tabs centred over the ring");
     }
 
@@ -1006,7 +1055,7 @@ mod tests {
             assert_eq!(w.hover, Some(Spot::Sound(1)));
             assert_eq!(w.rows(other), Rows::Sound);
             // (its own hint under the ring)
-            let hint = w.draws(other, true, true, 0, 0, &[0; 16], &[false; 2], true, 1, 0, true, false, false, None).into_iter().any(|d| matches!(d, Draw::Text((t, ..)) if t == SOUND_HINTS[si][1]));
+            let hint = w.draws(other, true, true, 0, 0, &[0; 16], &[false; 2], true, 1, 0, 0, true, false, false, None).into_iter().any(|d| matches!(d, Draw::Text((t, ..)) if t == SOUND_HINTS[si][1]));
             assert!(hint, "{key}");
             // (and where a ship's buttons would be, nothing of theirs)
             let b = button(1, 0);
@@ -1016,7 +1065,7 @@ mod tests {
             assert_eq!(Wheel::on_page(0, 1.0).rows(pl), Rows::Sound);
             let lit = |alt: [bool; 2]| -> Vec<u32> {
                 Wheel::on_page(0, 1.0)
-                    .draws(pl, true, true, 0, 0, &[0; 16], &alt, true, 1, 0, true, false, false, None)
+                    .draws(pl, true, true, 0, 0, &[0; 16], &alt, true, 1, 0, 0, true, false, false, None)
                     .into_iter()
                     .filter_map(|d| if let Draw::Text((t, _, c, _)) = d { (t == "MAIN" || t == "ALT").then_some(c) } else { None })
                     .collect()
@@ -1077,7 +1126,7 @@ mod layout_dump {
             let i = idx(laser);
             let mut w = Wheel::on_page(page_of(i), 3.5);
             w.striking = striking;
-            let draws = w.draws(i, true, false, 0, 0, &[0; 16], &[false; 2], true, 1, 0, false, true, false, Some(288));
+            let draws = w.draws(i, true, false, 0, 0, &[0; 16], &[false; 2], true, 1, 0, 0, false, true, false, Some(288));
             let mut out = String::new();
             for d in draws {
                 match d {

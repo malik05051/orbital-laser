@@ -633,7 +633,35 @@ pub const CARPET_BOMB: Laser = Laser {
     particle_b: "particle minecraft:explosion {x} {y} {z} {r} 2 {r} 0.2 4 force",
 };
 
-pub const LASERS: [&Laser; 19] = [&PLASMA, &GODLY, &BLACK_HOLE, &METEOR, &MOTHERSHIP, &DOWNFALL, &PLANET_KILLER, &CRYSTAL_BLOOM, &SINKHOLE, &PAYLOAD, &NUKE, &ROD, &SUPERCELL, &HURRICANE, &TSUNAMI, &FOLD, &SUPERVOLCANO, &SKYBREAK, &CARPET_BOMB];
+/// The earthquake, planned in `strike::quake_plan` (strike/quake.rs; the pass shaders/earthquake.wgsl). No beam: one of
+/// `strike::QK_PRESETS`, a historic earthquake (Tohoku 2011, Kobe 1995 ...), on the land round the target, everything by
+/// the JMA Shindo scale; the ones that raised a tsunami fire the Tsunami at the same target when they end (lib.rs).
+/// `length` is the longest preset's (each strike runs its own, `Quake::length`). The crater fields are only what the
+/// shared tests read: it digs none.
+pub const EARTHQUAKE: Laser = Laser {
+    key: "earthquake",
+    index: 19,
+    title: "EARTHQUAKE",
+    rgb: 0xE8A33C,
+    blurb: "A historic earthquake, by the Shindo scale: Tohoku, Kobe, Kanto, Kumamoto, Noto, Valdivia.",
+    icon_model: "orbital:earthquake_icon",
+    length: 100.0,
+    range: 1000.0,
+    scorch: &[],
+    bowl_r: 10,
+    bowl_d: 2,
+    bowl_rough: 0.1,
+    shaft_r: 0,
+    shaft_min: 0,
+    shaft_rough: 0.0,
+    lining: &[("minecraft:coarse_dirt", 1.0)],
+    bowl_floor: ("minecraft:coarse_dirt", 0.0, "minecraft:dirt"),
+    bottom: &[],
+    particle_a: "particle minecraft:poof {x} {y} {z} {r} 1 {r} 0.02 20 force",
+    particle_b: "particle minecraft:campfire_cosy_smoke {x} {y} {z} {r} 1 {r} 0.01 6 force",
+};
+
+pub const LASERS: [&Laser; 20] = [&PLASMA, &GODLY, &BLACK_HOLE, &METEOR, &MOTHERSHIP, &DOWNFALL, &PLANET_KILLER, &CRYSTAL_BLOOM, &SINKHOLE, &PAYLOAD, &NUKE, &ROD, &SUPERCELL, &HURRICANE, &TSUNAMI, &FOLD, &SUPERVOLCANO, &SKYBREAK, &CARPET_BOMB, &EARTHQUAKE];
 
 /// The ship lasers: they share the mothership's arrival and its approach and arrival choices.
 pub fn is_ship(l: &Laser) -> bool {

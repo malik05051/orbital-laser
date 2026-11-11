@@ -68,6 +68,9 @@ fn main() {
     let c: Vec<String> = [false, true].iter().map(|&f| write(format!("pass_carpet_{f}.wgsl"), passbuild::split_pass(&shader, &cp, f))).collect();
     writeln!(rs, "/// The Carpet Bomb's at QUALITY FULL and FAST.").unwrap();
     writeln!(rs, "const PASS_CARPET: [&str; 2] = [{}];", c.join(", ")).unwrap();
+    let quake = write("pass_quake.wgsl".into(), passbuild::own_pass(&shader, &read("earthquake.wgsl")));
+    writeln!(rs, "/// The Earthquake's (no half-size stage).").unwrap();
+    writeln!(rs, "const PASS_QUAKE: &str = {quake};").unwrap();
     let fold = write("pass_fold.wgsl".into(), passbuild::own_pass(&shader, &(passbuild::warp_shared(&read("fold_warp.wgsl")) + &read("fold.wgsl"))));
     writeln!(rs, "/// The Fold's (no half-size stage: its cost is the warp, drawn whole).").unwrap();
     writeln!(rs, "const PASS_FOLD: &str = {fold};").unwrap();
