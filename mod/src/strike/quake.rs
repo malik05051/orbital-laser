@@ -826,7 +826,7 @@ fn qk_chunk(w: &mut Work, cur: &Cur, k: usize, q: &mut Plan) -> bool {
 
     // ground cracks: a few lines across the chunk, mostly along the fault's strike, more the harder it shook
     let mut crack = [0u8; 256];
-    let rate = ramp(&[(5.5, 0.0), (6.0, 0.35), (6.5, 1.1), (7.0, 2.2)], ic);
+    let rate = ramp(&[(5.5, 0.0), (6.0, 0.2), (6.5, 0.6), (7.0, 1.2)], ic);
     let ncr = (rate + chance(cx, cz, seed, 1)).floor() as i32;
     for c in 0..ncr.max(0) as u32 {
         let (mut px, mut pz) = (chance(cx, cz, seed, 10 + c) * 16.0, chance(cx, cz, seed, 20 + c) * 16.0);
@@ -1017,7 +1017,7 @@ fn qk_chunk(w: &mut Work, cur: &Cur, k: usize, q: &mut Plan) -> bool {
             // liquefaction: soft ground near water boils up sand and mud, and what stands on it sinks a block
             let soft = cur.pal(col[at(g)]).soft;
             let p_liq = ramp(&[(5.0, 0.0), (5.5, 0.3), (6.0, 0.6), (7.0, 0.9)], ii) * quake.liquefy;
-            if soft && !nl.wet && wet[j] <= 6 && chance(x.div_euclid(4), z.div_euclid(4), seed, 80) < p_liq * 0.6 {
+            if soft && !nl.wet && wet[j] <= 4 && chance(x.div_euclid(4), z.div_euclid(4), seed, 80) < p_liq * 0.2 {
                 let boil = r(81) < 0.3;
                 if house {
                     // (sunk and tilted a little: the ground floor down a block into the mud)

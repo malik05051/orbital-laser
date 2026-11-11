@@ -267,6 +267,11 @@ fn swath_chunks(geo: &TsGeo) -> Vec<(i32, i32, f64)> {
             if u.abs() > TS_HALF + 14.0 || s < -TS_UP - 14.0 || s > geo.send + 14.0 {
                 continue;
             }
+            // (an Earthquake's smaller wave floods only a strip of the coast: none of the giant's whole swath is loaded,
+            // read or edited past it, so far less is left for the game to save, which it does all at once as it closes)
+            if geo.k < 0.999 && (u.abs() > 200.0 || s < -120.0 || s > 260.0 + 2000.0 * geo.k) {
+                continue;
+            }
             out.push((cx, cz, geo.arr(s, u)));
         }
     }
