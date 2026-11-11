@@ -292,11 +292,13 @@ Twenty lasers, five to a page of the wheel.
   the strike starts with the terrain on, and they stay; four close to the target, two far off along the coast inland).
   They sound as Japan's disaster-prevention radio does: a quake's early warning alert as it starts, and for a tsunami
   each broadcast a chime, the siren in the JMA's pattern (a Major Tsunami Warning's 3 s on and 2 s off, a Tsunami
-  Warning's 5 s on and 6 s off), a closing chime, again and again until the wave has come. Each pole is its own station,
-  started a few seconds apart from the next and heard late and fainter by its distance, the far ones muffled and
+  Warning's 5 s on and 6 s off), a closing chime, again and again until the wave has come. After each broadcast's closing chime comes a pause where its announcement is
+  spoken, before the next. Each pole is its own station,
+  started some seconds apart from the next and heard late and fainter by its distance, the far ones muffled and
   echoing: one wails close by while another answers from far off. `/orbital sirenvolume PERCENT` (0 to 200, kept; 100
-  by default, 0 silences them) sets their volume. Your own recording of the Earthquake Early Warning's chime can replace
-  the synthesised alert: `python3 tools/sounds_quake.py --eew-recording PATH` before building. The sirens, chimes and alert are synthesised by `tools/sounds_quake.py`
+  by default, 0 silences them) sets their volume. Their sounds fade out with distance over about 400 blocks. Your own recordings of the
+  Earthquake Early Warning's chime and of a Major Tsunami Warning's siren can replace the synthesised ones:
+  `python3 tools/sounds_quake.py --eew-recording PATH --major-recording PATH` before building. The sirens, chimes and alert are synthesised by `tools/sounds_quake.py`
   (nothing recorded). NHK's alert tone, and a recording of a coast's sirens heard faintly from further off, are your own
   recordings if you add them: put them in `orbital-sounds/assets/orbital/sounds/quake/` as `nhk_alert.ogg` and
   `siren.ogg` before building (they are kept out of the repository).

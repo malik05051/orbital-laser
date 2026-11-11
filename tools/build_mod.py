@@ -43,7 +43,7 @@ shutil.copy(sounds / "sounds.json", OUT / "assets" / "orbital" / "sounds.json")
 shutil.copytree(sounds / "sounds", OUT / "assets" / "orbital" / "sounds")
 # the player's own recordings (git-ignored) in place of the synthesised sounds, where they put one in: the events point
 # at them in the built sounds.json (tools/package_windows.py points them back when it leaves the recordings out)
-RECORDED = {"quake.eew": ("quake/synth/eew", "quake/eew"), "quake.eew_far": ("quake/synth/eew_far", "quake/eew_far")}
+RECORDED = {e: (f"quake/synth/{n}", f"quake/{n}") for n in ("eew", "eew_far", "major", "major_far") for e in [f"quake.{n}"]}
 sj = OUT / "assets" / "orbital" / "sounds.json"
 table = json.loads(sj.read_text())
 for event, (synth, rec) in RECORDED.items():

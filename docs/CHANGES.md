@@ -26,6 +26,10 @@ What each release of Orbital Laser added, newest first. The current release is i
 - The Earthquake Early Warning's chime can be your own recording (`tools/sounds_quake.py --eew-recording PATH`,
   git-ignored like the other two; `build_mod.py` plays it for `quake.eew`), for the alert in your pocket and from
   the siren poles.
+- The poles' sirens and alerts are quieter and fade out with distance (`QT_POLE_VOL`, 400 blocks: a volume over 1
+  had made them heard at full strength kilometres off); a Major Tsunami Warning's siren is `quake.major` (two 3 s
+  blasts 2 s apart, three times a broadcast; your own recording with `--major-recording`); each broadcast leaves a
+  pause for its spoken announcement (`QT_VOICE`) and the poles start further apart.
 - The tsunami: no more "SEA WITHDRAWING" messages, only the JMA's warning and its countdown. The sea draws back further
   (7 blocks for Tohoku) and is seen going: the bared bed glistens wet, water streams off it back out to sea. The wave
   runs up the land to where the player stands, up to three times its height at the coast (`run_up_k`, `QT_RUNUP`);

@@ -444,26 +444,32 @@ pub fn take_active() -> Option<HandOff> {
     ACTIVE.with(|p| p.borrow_mut().take())
 }
 
+/// How loud a pole's sounds are where they are made, at the player's 100% (the game takes a volume over 1 as more
+/// reach, not more loudness: a pole's sounds fade out linearly over their `attenuation_distance`, 400, in sounds.json).
+pub const QT_POLE_VOL: f32 = 0.55;
+/// The pause in a broadcast after its closing chime, where the announcement is spoken (seconds).
+pub const QT_VOICE: f64 = 14.0;
+
 /// The coast's disaster-prevention radio, from its poles: each broadcast a chime, then the siren in the JMA's pattern
-/// (a Major Tsunami Warning's 3 s on and 2 s off six times, a Tsunami Warning's 5 s on and 6 s off four), a closing
-/// chime, a pause, again, from `from` to `until`. Every pole is its own station: started a few seconds apart from the
-/// next (each town's set off on its own), heard late by its distance (at 343 a second) and fainter, the far ones
-/// muffled and echoing (`_far`), so near the coast one wails loud and others answer from further off. `vol` the player's
-/// siren volume (1 as made); none at all at 0.
+/// (a Major Tsunami Warning's 3 s on and 2 s off six times: `quake.major`, two blasts, three times; a Tsunami
+/// Warning's 5 s on and 6 s off four), a closing chime, then the pause the announcement is spoken in (`QT_VOICE`), and
+/// again, from `from` to `until`. Every pole is its own station: started some seconds apart from the next (each town's
+/// set off on its own), heard late by its distance (at 343 a second) and fainter, the far ones muffled and echoing
+/// (`_far`), so near the coast one wails while others answer from further off. `vol` the player's siren volume (1 as
+/// made); none at all at 0.
 #[allow(clippy::too_many_arguments)]
 pub fn sirens(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], from: f64, until: f64, major: bool, vol: f32, seed: u32) {
     if vol <= 0.0 {
         return;
     }
-    let (blast, every, n) = if major { ("siren3", 5.0, 6) } else { ("siren5", 11.0, 4) };
-    let cycle = 4.5 + every * f64::from(n) + 2.5 + 9.0;
+    let (blast, every, n) = if major { ("major", 10.0, 3) } else { ("siren5", 11.0, 4) };
+    let cycle = 4.5 + every * f64::from(n) + 2.5 + QT_VOICE;
     for (k, &[x, z]) in poles.iter().enumerate() {
         let d = (x - me[0]).hypot(z - me[2]);
         let far = if d > 140.0 { "_far" } else { "" };
-        let late = super::mh(k as u32, seed, 0x5a1) * 5.0 + d / 343.0;
+        let late = super::mh(k as u32, seed, 0x5a1) * 8.0 + d / 343.0;
         let at = Some([x, y + 9.0, z]);
-        // (heard as far as 16 blocks a unit of volume: some 260 at the player's 100%)
-        let v = 16.0 * vol;
+        let v = QT_POLE_VOL * vol;
         let push = |p: &mut Plan, t: f64, ev: &str| {
             if t >= from && t < until + 6.0 {
                 p.ev.push((t as f32, Act::Sound { event: format!("orbital:quake.{ev}{far}"), at, volume: v, pitch: 1.0 }));
@@ -496,7 +502,7 @@ pub fn eew_alert(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], t: f64,
         let d = (x - me[0]).hypot(z - me[2]);
         let far = if d > 140.0 { "_far" } else { "" };
         let late = super::mh(k as u32, seed, 0x5a2) * 1.5 + d / 343.0;
-        p.ev.push(((t + late) as f32, Act::Sound { event: format!("orbital:quake.eew{far}"), at: Some([x, y + 9.0, z]), volume: 16.0 * vol, pitch: 1.0 }));
+        p.ev.push(((t + late) as f32, Act::Sound { event: format!("orbital:quake.eew{far}"), at: Some([x, y + 9.0, z]), volume: 0.8 * QT_POLE_VOL * vol, pitch: 1.0 }));
     }
 }
 

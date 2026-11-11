@@ -3418,7 +3418,7 @@
     "sounds": [
       {
         "name": "orbital:quake/synth/siren3",
-        "attenuation_distance": 256
+        "attenuation_distance": 400
       }
     ],
     "subtitle": "subtitles.orbital.quake.siren3"
@@ -3427,7 +3427,7 @@
     "sounds": [
       {
         "name": "orbital:quake/synth/siren3_far",
-        "attenuation_distance": 256
+        "attenuation_distance": 400
       }
     ],
     "subtitle": "subtitles.orbital.quake.siren3"
@@ -3436,7 +3436,7 @@
     "sounds": [
       {
         "name": "orbital:quake/synth/siren5",
-        "attenuation_distance": 256
+        "attenuation_distance": 400
       }
     ],
     "subtitle": "subtitles.orbital.quake.siren5"
@@ -3445,7 +3445,7 @@
     "sounds": [
       {
         "name": "orbital:quake/synth/siren5_far",
-        "attenuation_distance": 256
+        "attenuation_distance": 400
       }
     ],
     "subtitle": "subtitles.orbital.quake.siren5"
@@ -3454,7 +3454,7 @@
     "sounds": [
       {
         "name": "orbital:quake/synth/chime_up",
-        "attenuation_distance": 256
+        "attenuation_distance": 400
       }
     ],
     "subtitle": "subtitles.orbital.quake.chime_up"
@@ -3463,7 +3463,7 @@
     "sounds": [
       {
         "name": "orbital:quake/synth/chime_up_far",
-        "attenuation_distance": 256
+        "attenuation_distance": 400
       }
     ],
     "subtitle": "subtitles.orbital.quake.chime_up"
@@ -3472,7 +3472,7 @@
     "sounds": [
       {
         "name": "orbital:quake/synth/chime_down",
-        "attenuation_distance": 256
+        "attenuation_distance": 400
       }
     ],
     "subtitle": "subtitles.orbital.quake.chime_down"
@@ -3481,7 +3481,7 @@
     "sounds": [
       {
         "name": "orbital:quake/synth/chime_down_far",
-        "attenuation_distance": 256
+        "attenuation_distance": 400
       }
     ],
     "subtitle": "subtitles.orbital.quake.chime_down"
@@ -3490,7 +3490,7 @@
     "sounds": [
       {
         "name": "orbital:quake/synth/eew",
-        "attenuation_distance": 256
+        "attenuation_distance": 400
       }
     ],
     "subtitle": "subtitles.orbital.quake.eew"
@@ -3499,9 +3499,27 @@
     "sounds": [
       {
         "name": "orbital:quake/synth/eew_far",
-        "attenuation_distance": 256
+        "attenuation_distance": 400
       }
     ],
     "subtitle": "subtitles.orbital.quake.eew"
+  },
+  "quake.major": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/major",
+        "attenuation_distance": 400
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.siren3"
+  },
+  "quake.major_far": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/major_far",
+        "attenuation_distance": 400
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.siren3"
   }
 }
