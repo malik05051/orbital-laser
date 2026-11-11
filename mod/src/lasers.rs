@@ -635,8 +635,9 @@ pub const CARPET_BOMB: Laser = Laser {
 
 /// The earthquake, planned in `strike::quake_plan` (strike/quake.rs; the pass shaders/earthquake.wgsl). No beam: one of
 /// `strike::QK_PRESETS`, a historic earthquake (Tohoku 2011, Kobe 1995 ...), on the land round the target, everything by
-/// the JMA Shindo scale; the ones that raised a tsunami fire the Tsunami at the same target when they end (lib.rs).
-/// `length` is the longest preset's (each strike runs its own, `Quake::length`). The crater fields are only what the
+/// the JMA Shindo scale; the ones that raised a tsunami raise it on the coast at the target (strike/qk_sea.rs).
+/// `length` is the longest a strike can run (Valdivia with the longest tsunami countdown; each runs its own,
+/// `strike::qk_length`). The crater fields are only what the
 /// shared tests read: it digs none.
 pub const EARTHQUAKE: Laser = Laser {
     key: "earthquake",
@@ -645,7 +646,7 @@ pub const EARTHQUAKE: Laser = Laser {
     rgb: 0xE8A33C,
     blurb: "A historic earthquake, by the Shindo scale: Tohoku, Kobe, Kanto, Kumamoto, Noto, Valdivia.",
     icon_model: "orbital:earthquake_icon",
-    length: 100.0,
+    length: 480.0,
     range: 1000.0,
     scorch: &[],
     bowl_r: 10,

@@ -709,7 +709,7 @@ impl Wheel {
             Some(Spot::Crease(k)) => (FD_PATTERNS[k.min(2)].2.to_string(), 0x8C93A0),
             Some(Spot::Quake(k)) => {
                 let q = &QK_PRESETS[k.min(QK_PRESETS.len() - 1)];
-                (format!("{}, Mw {:.1}, Shindo {}{}{}", q.name, q.mw, q.top_class(), if q.estimated { " est." } else { "" }, if q.tsunami { ", tsunami" } else { "" }), 0x8C93A0)
+                (format!("{}, Mw {:.1}, Shindo {}{}{}", q.name, q.mw, q.top_class(), if q.estimated { " est." } else { "" }, if q.tsunami.is_some() { ", tsunami" } else { "" }), 0x8C93A0)
             }
             Some(Spot::Knock) => ("The Nuke's and the Rod's push on you on or off".to_string(), 0x8C93A0),
             Some(Spot::Follow) => ("Camera chases the Nuke's or Payload's bomb down".to_string(), 0x8C93A0),

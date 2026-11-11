@@ -1290,14 +1290,41 @@ fault and every 0.42 s in longer holds for a great one (Mw 8 and up), so it roll
 **The actionbar** (`qk_second`): for the presets that had an Earthquake Early Warning that day (Tohoku, Kumamoto, Noto:
 the JMA's from 2007) `EARTHQUAKE EARLY WARNING · strong shaking · SHINDO 6+ expected` from a second after it starts until
 the S waves reach the player, with a two-note tone; then `SHINDO 6+ · 6 Upper · TOHOKU 2011 Mw 9.1` in the JMA's colour
-for that class while it shakes (`(est.)` for an estimated one); for those that raised a tsunami, `MAJOR TSUNAMI WARNING`
-once it is over. The status panel says the preset, its top Shindo and, during the strike, the Shindo where the player
+for that class while it shakes (`(est.)` for an estimated one; the class in words only where it differs, `6 Upper`);
+for those that raised a tsunami, its warning, countdown and gauge (below). The status panel says the preset, its top Shindo and, during the strike, the Shindo where the player
 stands now.
 
-**The tsunami.** Tohoku, Kanto, Noto and Valdivia raised one (`Quake::tsunami`). When such a strike ends on its own,
-lib.rs fires the Tsunami at the same target (`Strike::tsunami_after`, `fire_at`): its wave comes from beyond the target
-towards the player, which is the sea side of a megathrust here. `/orbital stop`, leaving the world or a stopped strike
-drops it. The Tsunami's pass is built as it fires, so the first time it can stall the game a moment.
+**The tsunami** ([`strike/qk_sea.rs`](../mod/src/strike/qk_sea.rs)). Tohoku, Kanto, Noto and Valdivia raised one
+(`Quake::tsunami`: the JMA's forecast `expect`, how far the sea draws back, its `waves`, how fast it runs inland and how
+far it reaches). Not the Tsunami laser's wall: what a tsunami is at a coast, in real water blocks. The target is the
+coast: the sea beyond it (d < 0), the land inland towards the player, the sea's surface `SEA` (62).
+
+- **When** (`sea_time`): the warning as the strong shaking peaks; the first wave `/orbital tsunamitime` seconds after it
+  (10 to 300, kept, 60 by default; passed in the plan's option, `qk_option`), but never sooner than 12 s after the
+  strong shaking; the sea drawing back for the last 8 to 22 s before it; the end 14 s after the last wave has gone. The
+  strike runs until then (`qk_length`).
+- **The sea at the coast** (`sea_s`): drawn back by `draw`, half that between the waves, each wave rising to its height
+  over its `rise`, holding, falling; back to its own level after the last. **Inland** (`level`): what it was at the coast
+  `d / speed` seconds before, its rise shrinking to nothing at `reach` (a draw-back reaches 40% as far).
+- **The water** (`sea_work`): every chunk the sea may reach is recorded as the quake's work leaves it (`sea_col`: sea
+  water within 3 of `SEA` over its bed, land with its ground and what stands on it, lakes and rivers above the sea's
+  level as ground, nothing where something holds things or lava is), and from the draw-back each is visited about once
+  a second, each column's water brought to where `level` has it: water put only into air, taken out only where it is
+  water, so nothing else is touched. A house standing in water two blocks deep and more is washed away (wooden, by the
+  Tohoku survey's fragility curves: a quarter at 2 m, most by 4; sturdier ones from 6), a house a 6 by 6 cell.
+- **Put back** (`sea_restore`): 24 `Act::Cleanup` stages at the end take off any water it put above the land's or the
+  sea's own level and fill the sea back to its level, the same filtered edits whatever was sent, so a stop puts it all
+  back too.
+- **Warning and sounds** (`qk_sea_warnings`, `qk_second`): a title as the warning goes out (`MAJOR TSUNAMI WARNING`, the
+  JMA's purple; `TSUNAMI WARNING` red under 3 m), as the sea draws back and as the first wave comes; over the hotbar the
+  countdown (`expected 10 m+ · first wave in 0:45`), then the coast's gauge (`the sea is withdrawing: -2.7 m`, `observed
+  +11.8 m · highest so far 11.8 m`). NHK's alert tone (`quake.nhk_alert`) as the warning goes out and again as the sea
+  draws back; the sirens (`quake.siren`, an 8 s recording looped) from the warning until the first wave has gone, from
+  four J-Alert siren poles along the coast (`siren_sites`, `siren_pole`: an iron-bar post eleven high with
+  lightning-rod horns, built as the strike starts with the terrain on, left standing; a column with a lightning rod is
+  left alone by the quake and the sea) and faintly anywhere; the sea's hiss as it withdraws (`tsunami.rumble_after`) and
+  each wave's roar (`tsunami.rumble`); splashes where the water first reaches a chunk, cracks where houses go. The alert
+  and siren sounds are the player's own recordings, git-ignored (`orbital-sounds/assets/orbital/sounds/quake/`).
 
 **Its sounds** are approved ones, nothing new: the P waves' `sinkhole.rumble`, each pulse's `supervolcano.tremor` with
 `sinkhole.rumble`, `skybreak.rumble` and `supervolcano.tremor` keeping the roar up through a long pulse and
@@ -1314,9 +1341,8 @@ chunk's changes (only the blocks that changed, set against what was read) go in 
 shaking reaches it (`strong_at`), or the trace breaks there. Chunks not loaded are asked again until 8 s before the end.
 The log says what it did: `earthquake [kobe]: N chunks changed, N columns of houses down, ...`.
 
-**Its pass** (earthquake.wgsl, no half-size stage): the land rolls, each point of it heaved up and down on the screen as
-the waves pass under it (a great quake's long swell, wavelength 90 and slow; a shallow one's 28 and quick), by the
-Shindo and the shaking there; dust is marched through a layer over the target's ground (24 steps): a low wall of it
+**Its pass** (earthquake.wgsl, no half-size stage) never moves the picture (the camera's shake is the game's: moving
+each pixel by where it is in the world smeared and doubled the land at every edge in depth); dust is marched through a layer over the target's ground (24 steps): a low wall of it
 thrown up along a surface-breaking trace as the rupture runs past, settling over half a minute, and patches of it over
 the land that shook at 6- and over, from the houses and slopes that gave. The pass reads the fault's strike in
 `mod_params[1].z`, the player as it fired in `[3].xyz` and the preset in `[3].w`; keep its `qk_preset` and `qk_pulse`

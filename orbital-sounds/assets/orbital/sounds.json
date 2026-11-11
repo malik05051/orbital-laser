@@ -3395,5 +3395,23 @@
       }
     ],
     "subtitle": "subtitles.orbital.carpetbomb.blast_far3"
+  },
+  "quake.nhk_alert": {
+    "sounds": [
+      {
+        "name": "orbital:quake/nhk_alert",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.nhk_alert"
+  },
+  "quake.siren": {
+    "sounds": [
+      {
+        "name": "orbital:quake/siren",
+        "attenuation_distance": 256
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.siren"
   }
 }

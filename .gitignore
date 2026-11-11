@@ -9,3 +9,5 @@ nohup.out
 mod/target/
 dist/
 tools/preview/target/
+# the player's own recordings of the JMA/NHK tsunami alert and sirens (copyrighted: kept out of the repository)
+orbital-sounds/assets/orbital/sounds/quake/

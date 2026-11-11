@@ -4,10 +4,9 @@
 
 // ---- laser 19: the earthquake -------------------------------------------------------------------------------------
 // No beam, nothing from the sky: a historic earthquake (strike/quake.rs's QK_PRESETS) on the land round the target. The
-// game's own camera shakes (the plan's jolts); here the land itself rolls as the waves pass under it, hardest where the
-// Shindo is highest and while the shaking is there (`qk_env`), the long slow swell of a great megathrust, the quick
-// jolts of a shallow fault; dust kicks up along the trace as the rupture runs out along it, and boils up in patches over
-// the land where it shook at 6- and over, from the houses that fell and the slopes that slid, drifting and settling.
+// game's own camera shakes (the plan's jolts); this pass never moves the picture. Dust kicks up along the trace as the
+// rupture runs out along it, and boils up in patches over the land where it shook at 6- and over, from the houses that
+// fell and the slopes that slid, drifting and settling. A tsunami's water is real water blocks (strike/qk_sea.rs).
 // Everything here is strike/quake.rs's model: keep QK_*, qk_preset and qk_pulse in step with QK_PRESETS and QkGeo.
 //
 // frame.mod_params: [1].z the fault's strike (radians), [3].xyz the player as it fired, [3].w the preset.
@@ -27,7 +26,7 @@ struct QkP {
     half: f32,
     hypo: f32,
     n: i32,             // its pulses (qk_pulse)
-    len: f32,           // the strike's seconds
+    len: f32,           // the shaking's seconds (the dust gone by then; a tsunami runs on with no pass to draw)
 };
 fn qk_preset(i: i32) -> QkP {
     switch i {
@@ -258,33 +257,9 @@ fn earthquake(in: StageIn) -> vec4<f32> {
     let day = saturate(sun.y * 2.5 + 0.35);
     let fade = 1.0 - smoothstep(P.len - 6.0, P.len, t);
 
-    let d0 = depth_at(uv);
-    let sky0 = is_sky(d0);
-    let rel0 = world_offset(uv, select(d0, 0.5, sky0));
-
-    // ---- the land rolls: each point of it heaved up and down as the waves go under it --------------------------------
-    var uv2 = uv;
-    if (!sky0 && t > QK_T0) {
-        let w = rel0 + cam;
-        let q = w.xz - F.t;
-        let u = dot(q, F.st);
-        let d = dot(q, F.nm);
-        let amp = qk_shake(qk_ii(P, u, d)) * qk_env(i, P, u, d, t) * k * fade;
-        if (amp > 0.002) {
-            // (a great quake's long swell, a shallow one's short, quick waves)
-            let lam = mix(28.0, 90.0, smoothstep(7.0, 9.0, P.mw));
-            let c = lam * mix(1.6, 0.55, smoothstep(7.0, 9.0, P.mw));
-            let r = qk_rh(P, u, d);
-            let ph = 6.2831853 * (r / lam - t * c / lam);
-            let lift = amp * (0.22 + 0.25 * smoothstep(7.5, 9.0, P.mw)) * sin(ph + 0.6 * sin(u * 0.02 + seed_v()));
-            let near = 1.0 / (1.0 + length(rel0) / 260.0);
-            let a = project_rel(rel0);
-            let b = project_rel(rel0 + vec3<f32>(0.0, lift * near * 4.0, 0.0));
-            if (a.z > 0.0 && b.z > 0.0) {
-                uv2 = clamp(uv - (b.xy - a.xy), vec2<f32>(0.002), vec2<f32>(0.998));
-            }
-        }
-    }
+    // (the picture itself is never moved: the game's own camera shake does that, and moving each pixel by where it is
+    // in the world tore the land into doubled, smeared bands at every edge in depth)
+    let uv2 = uv;
     var col = srgb_to_linear(textureSampleLevel(scene_color, linear_sampler, uv2, 0.0).rgb);
     let d = depth_at(uv2);
     let sky = is_sky(d);

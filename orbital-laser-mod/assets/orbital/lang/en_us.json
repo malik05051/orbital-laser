@@ -159,5 +159,7 @@
   "subtitles.orbital.carpetbomb.blast4": "Bomb explodes",
   "subtitles.orbital.carpetbomb.blast_far1": "Bombs explode in the distance",
   "subtitles.orbital.carpetbomb.blast_far2": "Bombs explode in the distance",
-  "subtitles.orbital.carpetbomb.blast_far3": "Bombs explode in the distance"
+  "subtitles.orbital.carpetbomb.blast_far3": "Bombs explode in the distance",
+  "subtitles.orbital.quake.nhk_alert": "Tsunami warning broadcast",
+  "subtitles.orbital.quake.siren": "Tsunami sirens wail"
 }

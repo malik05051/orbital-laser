@@ -254,8 +254,6 @@ struct Strike {
     /// The light on the player's hand its plan gave (`Act::Hand`), and the seconds of frames since the last tick.
     hand: Option<Box<dyn strike::HandLight>>,
     hand_t: f32,
-    /// An Earthquake that raised a tsunami: the Tsunami fired at its target (block, point) as it ends (`tick_strike`).
-    tsunami_after: Option<([i32; 3], [f64; 3])>,
 }
 
 /// Whether a strike tints the first-person hand (`render.set-hand-tint`). Off for now: under the Supervolcano it went
@@ -296,6 +294,7 @@ fn command_paths() -> Vec<String> {
     for q in strike::QK_PRESETS.iter() {
         add(&["quake", q.key]);
     }
+    add(&["tsunamitime"]);
     for a in strike::APPROACHES.iter() {
         add(&["approach", a.key]);
     }
@@ -406,6 +405,7 @@ struct Settings {
     fold_pattern: usize,
     carry_turn: bool,
     quake: usize,
+    tsunami_time: u32,
 }
 
 /// A ship laser's colour until one is picked (strike::COLOURS): the Mothership green, the Downfall red.
@@ -460,6 +460,8 @@ struct Orbital {
     fold_pattern: usize,
     /// Which historic earthquake the Earthquake plays (strike::QK_PRESETS; `/orbital quake`, the wheel's QUAKE row).
     quake: usize,
+    /// Seconds from an Earthquake's tsunami warning to its first wave (`/orbital tsunamitime`, kept).
+    tsunami_time: u32,
     /// How the Fold's droplet stops (fold.wgsl's fd_stop; `/orbital foldstop N`, a dev command for trying them, not kept).
     fold_stop: usize,
     /// While the Fold's sphere is shut round the player (`strike::FD_STAY`): their flight kept to vanilla's at most.
@@ -555,7 +557,7 @@ pub(crate) fn trace(what: &str) {
 impl Orbital {
     /// The mod's state with these settings, nothing under way.
     fn new(settings: Settings) -> Orbital {
-        let Settings { laser, terrain, hud, approach, arrival, page, colours, fly, blast_alt, fast, impact, knock, follow, follow_distance, seed_lock, impact_style, fold_pattern, carry_turn, quake } = settings;
+        let Settings { laser, terrain, hud, approach, arrival, page, colours, fly, blast_alt, fast, impact, knock, follow, follow_distance, seed_lock, impact_style, fold_pattern, carry_turn, quake, tsunami_time } = settings;
         Orbital {
             passes: [PASS_OWN[0], PASS_OWN[1], PASS_OWN[2], PASS_OWN[3], PASS_OWN[4], payload_pass(fast), nuke_pass(fast), rod_pass(fast), supercell_pass(fast), hurricane_pass(fast), PASS_FOLD, volcano_pass(fast), tsunami_pass(fast), skybreak_pass(fast), carpet_pass(fast), quake_pass()],
             compiled: None,
@@ -586,6 +588,7 @@ impl Orbital {
             impact_style,
             fold_pattern,
             quake,
+            tsunami_time,
             fold_stop: 4,
             knock,
             follow,
@@ -623,7 +626,7 @@ impl Orbital {
     }
     fn save(&self) {
         let text = format!(
-            "laser={}\nterrain={}\nhud={}\napproach={}\narrival={}\npage={}\nflyspeed={}\npayloadsound={}\nnukesound={}\nquality={}\nimpactframes={}\nfoldpattern={}\nquake={}\nknockback={}\ncarryview={}\nfollow={}\nfollowdistance={}\nseed={}\n",
+            "laser={}\nterrain={}\nhud={}\napproach={}\narrival={}\npage={}\nflyspeed={}\npayloadsound={}\nnukesound={}\nquality={}\nimpactframes={}\nfoldpattern={}\nquake={}\ntsunamitime={}\nknockback={}\ncarryview={}\nfollow={}\nfollowdistance={}\nseed={}\n",
             LASERS[self.laser].key,
             u8::from(self.terrain),
             u8::from(self.hud),
@@ -637,6 +640,7 @@ impl Orbital {
             if self.impact { IMPACT_STYLES[usize::from(self.impact_style.min(2))] } else { "off" },
             strike::FD_PATTERNS[self.fold_pattern.min(2)].0,
             strike::QK_PRESETS[self.quake.min(strike::QK_PRESETS.len() - 1)].key,
+            self.tsunami_time,
             if self.knock { "on" } else { "off" },
             if self.carry_turn { "turn" } else { "still" },
             if self.follow { "on" } else { "off" },
@@ -686,6 +690,7 @@ impl Orbital {
         let mut impact_style = 1u8;
         let mut fold_pattern = 0;
         let mut quake = 0;
+        let mut tsunami_time = strike::QT_COUNTDOWN as u32;
         let mut knock = true;
         let mut carry_turn = true;
         let mut follow = false;
@@ -713,6 +718,7 @@ impl Orbital {
                 }
                 Some(("foldpattern", v)) => fold_pattern = strike::FD_PATTERNS.iter().position(|p| p.0 == v).unwrap_or(0),
                 Some(("quake", v)) => quake = strike::qk_preset(v).unwrap_or(0),
+                Some(("tsunamitime", v)) => tsunami_time = v.parse::<u32>().ok().map_or(strike::QT_COUNTDOWN as u32, |n| n.clamp(10, strike::QT_COUNTDOWN_MAX as u32)),
                 Some(("knockback", v)) => knock = v != "off",
                 Some(("carryview", v)) => carry_turn = v != "still",
                 Some(("follow", v)) => follow = v == "on",
@@ -728,7 +734,7 @@ impl Orbital {
                 _ => {}
             }
         }
-        Settings { laser, terrain, hud, approach, arrival, page, colours, fly, blast_alt, fast, impact, knock, follow, follow_distance, seed_lock, impact_style, fold_pattern, carry_turn, quake }
+        Settings { laser, terrain, hud, approach, arrival, page, colours, fly, blast_alt, fast, impact, knock, follow, follow_distance, seed_lock, impact_style, fold_pattern, carry_turn, quake, tsunami_time }
     }
 
     /// The one message over the hotbar: the designator has nothing in range to aim at (`fire`).
@@ -1206,8 +1212,7 @@ impl Orbital {
         }
         self.fire_at(laser, [hit.block_x, hit.block_y, hit.block_z], [hit.x, hit.y, hit.z]);
     }
-    /// A strike of `laser` at the target `block` (the point hit on it `point`): the designator's, or the Tsunami an
-    /// Earthquake raised (`tsunami_after`).
+    /// A strike of `laser` at the target `block` (the point hit on it `point`).
     fn fire_at(&mut self, laser: &'static lasers::Laser, block: [i32; 3], point: [f64; 3]) {
         let player = game::get_player();
         let dimension = player.as_ref().map_or("minecraft:overworld".to_string(), |p| p.dimension.clone());
@@ -1226,7 +1231,7 @@ impl Orbital {
         let option = if laser.key == "fold" {
             self.fold_pattern
         } else if laser.key == "earthquake" {
-            self.quake
+            strike::qk_option(self.quake, self.tsunami_time)
         } else { wheel::sound_of(laser.key).map_or(self.approach, |s| usize::from(self.blast_alt[s])) };
         let plan = strike::plan(laser, &target, self.terrain, &dimension, seed, me, option);
         // (the Fold asks how low the land lies round the target; `tick` takes the answer in)
@@ -1291,8 +1296,7 @@ impl Orbital {
         // the pass's tables due before then are worked out on the first ticks, as the pass needs them, what they give
         // that was due before then left out too)
         // (an Earthquake runs as long as its preset)
-        let quake = (laser.key == "earthquake").then(|| &strike::QK_PRESETS[self.quake.min(strike::QK_PRESETS.len() - 1)]);
-        let length = quake.map_or(laser.length, |q| q.length);
+        let length = if laser.key == "earthquake" { strike::qk_length(self.quake, f64::from(self.tsunami_time)) } else { laser.length };
         let ticks = (self.skip.min(length - 1.0) * 20.0) as u32;
         let wait = if ticks == 0 && laser.key == "fold" { (strike::FD_LEAD * 20.0) as u32 } else { 0 };
         let skipped = if wait > 0 { -strike::FD_LEAD } else { ticks as f32 * 0.05 };
@@ -1304,7 +1308,7 @@ impl Orbital {
         // (the sinkhole's slabs, rings and rim come on the tick after: strike::sh_table, as Act::Table)
         let data = if laser.key == "crystalbloom" { strike::cb_table(seed) } else { Vec::new() };
         render::set_data(&data);
-        self.strike = Some(Strike { plan, next, more: Default::default(), given: 0, ticks, length, params, level: level_tag.map(|t| (t, target.block)), waiting: Default::default(), urgent: Default::default(), data, data_sent: true, skipped, wait, sounds: Default::default(), key: laser.key, sprites: if laser.key == "hurricane" { sdk::atlas::resources_version() } else { 0 }, hand: None, hand_t: 0.0, tsunami_after: quake.filter(|q| q.tsunami).map(|_| (block, point)) });
+        self.strike = Some(Strike { plan, next, more: Default::default(), given: 0, ticks, length, params, level: level_tag.map(|t| (t, target.block)), waiting: Default::default(), urgent: Default::default(), data, data_sent: true, skipped, wait, sounds: Default::default(), key: laser.key, sprites: if laser.key == "hurricane" { sdk::atlas::resources_version() } else { 0 }, hand: None, hand_t: 0.0 });
         self.hold_forceloads(&dimension, clock, length + wait as f32 * 0.05);
         // (the Hurricane's wind carrying the player off once it reaches them, with the knockback on)
         self.carrying = (laser.key == "hurricane" && self.knock && player.is_some()).then(|| carry::Carry::new([block[0] as f64 + 0.5, block[1] as f64 + 1.0, block[2] as f64 + 0.5]));
@@ -1524,13 +1528,7 @@ impl Orbital {
             render::shake(strength, seconds);
         }
         if now >= s.length {
-            // (an Earthquake that raised a tsunami: the sea comes, at the same target, from beyond it towards the player)
-            let after = s.tsunami_after.take();
             self.end_strike();
-            if let Some((block, point)) = after {
-                log::write(log::Level::Info, "earthquake: the tsunami it raised comes");
-                self.fire_at(&lasers::TSUNAMI, block, point);
-            }
         }
         self.carve(CARVE_CMDS.saturating_sub(carved));
         trace("end");
@@ -1887,7 +1885,10 @@ impl Orbital {
             if l.key == "earthquake" {
                 let q = &strike::QK_PRESETS[self.quake.min(strike::QK_PRESETS.len() - 1)];
                 lines.push((format!("Quake: {}, Mw {:.1}", q.name, q.mw), 0xE8A33C));
-                lines.push((format!("Shindo {}{} at the fault{}", q.top_class(), if q.estimated { " (est.)" } else { "" }, if q.tsunami { ", then a tsunami" } else { "" }), strike::shindo_class(q.shindo).2));
+                lines.push((format!("Shindo {}{} at the fault", q.top_class(), if q.estimated { " (est.)" } else { "" }), strike::shindo_class(q.shindo).2));
+                if let Some(ts) = &q.tsunami {
+                    lines.push((format!("Tsunami {}: first wave {} s after the warning", ts.expect, self.tsunami_time), 0xC800FF));
+                }
                 // (the Shindo where the player stands now, as the strike's model has it)
                 if let Some(s) = self.strike.as_ref().filter(|s| s.key == "earthquake")
                     && let Some(p) = game::get_player()
@@ -1895,7 +1896,7 @@ impl Orbital {
                     let t = strike::Target { block: [s.params[4].floor() as i32, s.params[11] as i32, s.params[5].floor() as i32], point: [f64::from(s.params[0]), f64::from(s.params[1]), f64::from(s.params[2])] };
                     let geo = strike::QkGeo::new(self.quake, &t, [f64::from(s.params[12]), f64::from(s.params[13]), f64::from(s.params[14])], s.params[8]);
                     let (c, words, rgb) = strike::shindo_class(geo.ii(p.x, p.z));
-                    lines.push((format!("Shindo here: {c} ({words})"), rgb));
+                    lines.push((if words == c { format!("Shindo here: {c}") } else { format!("Shindo here: {c} ({words})") }, rgb));
                 }
             }
             if (l.key == "nuke" || l.key == "payload") && self.follow {
@@ -2267,10 +2268,23 @@ impl Mod for Orbital {
                         self.quake = k;
                         self.save();
                         let q = &strike::QK_PRESETS[k];
-                        Ok(Some(format!("Earthquake: {} ({}), Mw {:.1}, Shindo {}{}{} (the next strike's)", q.name, q.date, q.mw, q.top_class(), if q.estimated { " est." } else { "" }, if q.tsunami { ", a tsunami after" } else { "" })))
+                        let when = q.aka.map_or(q.date.to_string(), |a| format!("{a}, {}", q.date));
+                        Ok(Some(format!("Earthquake: {} ({when}), Mw {:.1}, Shindo {}{}{} (the next strike's)", q.name, q.mw, q.top_class(), if q.estimated { " est." } else { "" }, q.tsunami.as_ref().map_or(String::new(), |t| format!(", a tsunami of {} after", t.expect)))))
                     }
                     None if v.is_none() => Ok(Some(format!("Earthquake: {} (/orbital quake {list})", strike::QK_PRESETS[self.quake].name))),
                     None => Err(format!("/orbital quake {list}")),
+                }
+            }
+            (Some("tsunamitime"), v) => {
+                let max = strike::QT_COUNTDOWN_MAX as u32;
+                match v.map(str::parse::<u32>) {
+                    Some(Ok(n)) if (10..=max).contains(&n) => {
+                        self.tsunami_time = n;
+                        self.save();
+                        Ok(Some(format!("Tsunami countdown: the first wave {n} s after the warning (the next Earthquake's; never before its strong shaking is over)")))
+                    }
+                    None => Ok(Some(format!("Tsunami countdown: {} s (/orbital tsunamitime 10 to {max})", self.tsunami_time))),
+                    _ => Err(format!("/orbital tsunamitime SECONDS (10 to {max})")),
                 }
             }
             (Some("foldstop"), v) => {
@@ -2958,7 +2972,8 @@ mod stress {
     #[test]
     fn only_no_target_goes_over_the_hotbar() {
         let target = Target { block: [10, 64, -3], point: [10.5, 65.0, -2.5] };
-        for l in LASERS {
+        // (but the Earthquake's: its JMA warnings and Shindo, which the player asked for)
+        for l in LASERS.iter().filter(|l| l.key != "earthquake") {
             for approach in 0..2 {
                 let plan = strike::plan(l, &target, false, "minecraft:overworld", 7.0, [10.5, 66.0, 97.0], approach);
                 assert!(!plan.iter().any(|(_, a)| matches!(a, Act::Cmd(c) if c.starts_with("title "))), "{}", l.key);
@@ -3537,7 +3552,7 @@ mod stress {
         };
         let mut plan: Vec<(f32, Act)> = (0..60).map(|k| (0.05, Act::Later(heavy(k)))).collect();
         plan.extend((0..3000).map(|i| (0.05, Act::Cmd(format!("setblock {i} 1 1 minecraft:stone")))));
-        o.strike = Some(Strike { plan, next: 0, more: Default::default(), given: 0, ticks: 0, length: 1000.0, params: [0.0; 16], level: None, waiting: Default::default(), urgent: Default::default(), data: Vec::new(), data_sent: true, skipped: 0.0, wait: 0, sounds: Default::default(), key: "", sprites: 0, hand: None, hand_t: 0.0, tsunami_after: None });
+        o.strike = Some(Strike { plan, next: 0, more: Default::default(), given: 0, ticks: 0, length: 1000.0, params: [0.0; 16], level: None, waiting: Default::default(), urgent: Default::default(), data: Vec::new(), data_sent: true, skipped: 0.0, wait: 0, sounds: Default::default(), key: "", sprites: 0, hand: None, hand_t: 0.0 });
         let mut worst = 0;
         let mut ticks = 0;
         while o.strike.as_ref().is_some_and(|s| s.next < s.plan.len() || !s.more.is_empty() || !s.waiting.is_empty()) || !o.carving.is_empty() {

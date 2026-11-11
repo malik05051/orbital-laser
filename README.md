@@ -237,12 +237,12 @@ Twenty lasers, five to a page of the wheel.
 
   | Preset | Mw | Fault | Shindo at the fault | After it |
   |---|---|---|---|---|
-  | **Tohoku 2011** | 9.1 | megathrust, offshore | 7 | the Tsunami |
+  | **Tohoku 2011** | 9.1 | megathrust, offshore | 7 | a tsunami, 10 m+ (its second wave the highest) |
   | **Kobe 1995** (Great Hanshin) | 6.9 | strike-slip, under the city | 7 | fires |
-  | **Kanto 1923** (Great Kanto) | 7.9 | megathrust, under the bay | 7 (estimated) | fires, then the Tsunami |
+  | **Kanto 1923** (Great Kanto) | 7.9 | megathrust, under the bay | 7 (estimated) | fires, then a tsunami, 10 m |
   | **Kumamoto 2016** | 7.0 | strike-slip, a Shindo 7 foreshock first | 7 | landslides |
-  | **Noto 2024** | 7.5 | reverse, the far side heaves up 4 m | 7 | fires, then the Tsunami |
-  | **Valdivia 1960** | 9.5, the strongest ever recorded | megathrust, offshore | 7 (estimated) | the Tsunami |
+  | **Noto 2024** | 7.5 | reverse, the far side heaves up 4 m | 7 | fires, then a tsunami, 5 m |
+  | **Valdivia 1960** | 9.5, the strongest ever recorded | megathrust, offshore | 7 (estimated) | a tsunami, 10 m+ |
 
   The Shindo at each place comes from its distance to the rupture (a published attenuation of ground motion, anchored
   on the quake's own highest Shindo), and it decides everything there: how hard your view shakes, what the status
@@ -256,12 +256,27 @@ Twenty lasers, five to a page of the wheel.
   rivers and fences offset by its slip (real size, a block a metre), an en-echelon fissure, the ground rucked up beside
   it; a reverse fault heaves the far side up in a scarp. Dust kicks up along the trace and over the wrecked land. For
   the quakes that had one that day (Tohoku, Kumamoto, Noto) an **Earthquake Early Warning** shows over the hotbar before
-  the strong shaking reaches you, then the Shindo while it shakes; the quakes that raised a tsunami end on a **Major
-  Tsunami Warning**, and then **the Tsunami comes**: the real Tsunami laser, fired at the same target, the wave coming in
-  from beyond it (the sea side) towards you. `/orbital stop` during the quake stops the tsunami too. Real times are
-  sped up about three times and distances shrunk to fit: a strike runs 40 (Kobe) to 100 seconds (Valdivia), and the
-  land is changed out to about 200 blocks round the target. **Motion sensitivity:** the camera shakes for up to a
-  minute and a half, and the picture itself rolls with the land.
+  the strong shaking reaches you, then the Shindo while it shakes. Real times are sped up about three times and
+  distances shrunk to fit: the shaking runs 40 (Kobe) to 100 seconds (Valdivia), and the land is changed out to about 200
+  blocks round the target. **Motion sensitivity:** the camera shakes for up to a minute and a half.
+
+  **The tsunami** (Tohoku, Kanto, Noto, Valdivia). Not a wall of water: what a tsunami does at a coast, in real water
+  blocks. **Aim at the coast**: the sea is taken to lie beyond the target and the land inland towards you, at the
+  sea's level (y 62). As the shaking peaks the JMA's **Major Tsunami Warning** goes out (with the expected height,
+  "10 m+" for Tohoku, "5 m" for Noto), with NHK's alert tone and the wail of the coast's **J-Alert sirens**: four siren
+  poles stand along the coast (built as the strike starts, terrain on; they stay), and the sirens sound from them. A
+  **countdown** to the first wave runs over the hotbar: `/orbital tsunamitime SECONDS` (10 to 300, kept; 60 by
+  default) sets it, though the first wave never comes before the strong shaking is over. Then **the sea withdraws**,
+  baring the seabed, the hotbar giving the gauge at the coast ("the sea is withdrawing: -2.7 m"), and **a train of
+  waves** comes, each a surge of the sea rising over ten seconds or so, a few metres to about twelve (a block a metre),
+  flooding the low land inland and running back off it; the biggest is not always the first. Wooden houses standing in
+  two metres of water and more are washed away (sturdier ones from six). The hotbar gives what the coast's gauge
+  observes and the highest so far. When it is over, everything the sea did is put back: the sea at its level, the land
+  dry (and at once if you stop the strike). The whole strike, tsunami included, runs about 3 to 8 minutes.
+
+  The tsunami's NHK alert and siren sounds are your own recordings, not part of the repository: put them in
+  `orbital-sounds/assets/orbital/sounds/quake/` as `nhk_alert.ogg` and `siren.ogg` before building (a build without
+  them plays a note-block chime alone).
 
 Plasma, Godly, the Black Hole and the Meteor Storm reach 200 blocks; the Mothership, the Downfall, the Planet Killer, the
 Crystal Bloom, the Sinkhole, the Payload, the Nuke, the Rod from God, the Supercell, the Hurricane, the Tsunami, the Fold, the
@@ -451,8 +466,8 @@ Mods), read the reason it gives first.
 Only one strike runs at a time. Plasma, Godly and the Black Hole take about 26 seconds, the Planet Killer 30.5, the
 Mothership 34, the Carpet Bomb 37.5, the Meteor Storm 38, the Sinkhole 40, the Supercell and the Tsunami 42, the Sky Breaks 49.5, the Crystal Bloom and the Rod from God 60,
 the Downfall, the Hurricane and the Fold 64, the Payload 70, the Supervolcano 88 and the Nuke 90. The Earthquake runs as
-long as its preset: Kobe 40, Kumamoto 46, Noto 48, Kanto 62, Tohoku 80 and Valdivia 100, and those that raise a
-tsunami are followed by the Tsunami's 42.
+long as its preset: Kobe 40 and Kumamoto 46; the ones with a tsunami run on until the sea is back, about 3 minutes
+with the default countdown (Noto) to 4 (Valdivia), longer with a longer countdown.
 
 The wheel also has:
 
@@ -485,6 +500,7 @@ The wheel also has:
 | `/orbital wheel` | opens the laser wheel |
 | `/orbital plasma`, `godly`, `blackhole`, `meteor`, `mothership`, `downfall`, `planetkiller`, `crystalbloom`, `sinkhole`, `payload`, `nuke`, `rod`, `supercell`, `hurricane`, `tsunami`, `fold`, `supervolcano`, `skybreak`, `carpetbomb`, `earthquake` | loads that laser |
 | `/orbital quake tohoku\|kobe\|kanto\|kumamoto\|noto\|valdivia` | which historic earthquake the Earthquake plays; kept; also the wheel's QUAKE row |
+| `/orbital tsunamitime SECONDS` | the countdown from an Earthquake's tsunami warning to its first wave, 10 to 300 (60 by default); kept |
 | `/orbital terrain on\|off` | terrain damage on, or off (light and sound only) |
 | `/orbital approach ahead\|behind\|left\|right\|overhead` | where the ship comes in from |
 | `/orbital arrival snap\|unfold\|warp` | how the ship arrives |
@@ -552,9 +568,9 @@ Orbital Laser → Settings**).
 - **Single player** (or hosting LAN). The world changes need a world the game itself runs, and the effects are drawn
   only for the player who fired.
 - **Terrain damage can't be undone.** Back up the world, or switch terrain damage off.
-- **The Earthquake's tsunami may stall the game for a moment as it starts** the first time, on the fork version, while
-  the Tsunami's effects are built (the game holds one post pass at a time). The Shindo where you stand is worked out
-  each second from where you are, but the land's damage is fixed as the strike fires.
+- **The Earthquake's tsunami floods relative to the sea's level (y 62)** and takes the target as the coast: aimed far
+  inland or up a mountain, the sea draws back and floods nothing. The Shindo where you stand is worked out each second
+  from where you are, but the land's damage is fixed as the strike fires.
 - **Targets must be in loaded chunks.** The sixteen long-range lasers reach 1000 blocks across the distant terrain, where
   the aim follows the coarser distant heights, and a crater only shows there once those chunks load.
 
