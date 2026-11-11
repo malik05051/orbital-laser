@@ -16,7 +16,7 @@ release, downloaded) and puts the mod from dist/orbital in place of the one in i
     python3 tools/build_mod.py                 # first: dist/orbital
     python3 tools/package_windows.py [--base ZIP] [--out ZIP] [--with-recordings]
 
-The Earthquake's two optional recordings (sounds/quake/nhk_alert.ogg and siren.ogg) are someone else's and kept out of
+The Earthquake's optional recordings (sounds/quake/nhk_alert.ogg, siren.ogg, eew.ogg, major.ogg and their far versions) are someone else's and kept out of
 the repository; they are left out of the zip too unless `--with-recordings` (for your own use, not for a release).
 Writes the zip and its SHA-256 (beside it, as `<zip>.sha256`).
 """
@@ -28,7 +28,7 @@ MOD = ROOT / "dist" / "orbital"
 WIN = ROOT / "tools" / "windows"
 TOP = "orbital-laser-windows-test/"
 BASE_URL = "https://github.com/Stink-O/orbital-laser/releases/latest/download/orbital-laser-windows-test.zip"
-RECORDINGS = {"assets/orbital/sounds/quake/nhk_alert.ogg", "assets/orbital/sounds/quake/siren.ogg"}
+RECORDINGS = {"assets/orbital/sounds/quake/nhk_alert.ogg", "assets/orbital/sounds/quake/siren.ogg", "assets/orbital/sounds/quake/eew.ogg", "assets/orbital/sounds/quake/eew_far.ogg", "assets/orbital/sounds/quake/major.ogg", "assets/orbital/sounds/quake/major_far.ogg"}
 # what this checkout supplies in place of the base zip's own
 OURS = ("game/horizon-mods/orbital/", "game/horizon-mods.txt", "play.bat", "prepare.bat", "README-WINDOWS.txt", "LICENSE", "NOTICE")
 
@@ -83,7 +83,12 @@ with tempfile.TemporaryDirectory() as tmp:
             if rel in RECORDINGS and not args.with_recordings:
                 left_out.append(rel)
                 continue
-            add("game/horizon-mods/orbital/" + rel, f.read_bytes())
+            data = f.read_bytes()
+            if rel == "assets/orbital/sounds.json" and not args.with_recordings:
+                # (an event build_mod.py pointed at a recording left out points back at its synthesised sound)
+                for n in (b"eew", b"eew_far", b"major", b"major_far"):
+                    data = data.replace(b'"orbital:quake/' + n + b'"', b'"orbital:quake/synth/' + n + b'"')
+            add("game/horizon-mods/orbital/" + rel, data)
             mod += 1
     part.replace(out)
 

@@ -164,8 +164,7 @@ impl Flood {
     }
     /// Whether the chunk (cx, cz) lies where the sea works.
     pub fn covers(&self, cx: i32, cz: i32) -> bool {
-        let (u, d) = self.geo.ud(f64::from(cx) * 16.0 + 8.0, f64::from(cz) * 16.0 + 8.0);
-        u.abs() <= QT_HALF + 8.0 && d >= -QT_OUT - 8.0 && d <= self.ts().reach + 16.0
+        sea_covers(&self.geo, self.ts(), cx, cz)
     }
     /// A chunk as the quake left it: kept if the sea can reach any of it.
     pub fn add(&mut self, cx: i32, cz: i32, cols: Box<[FCol; 256]>) {
@@ -185,6 +184,12 @@ impl Flood {
             self.chunks.push(FChunk { cx, cz, cols, reached: false });
         }
     }
+}
+
+/// Whether the chunk (cx, cz) lies where tsunami `ts`'s sea works (it stays loaded until the sea is put back).
+pub fn sea_covers(geo: &QkGeo, ts: &Tsu, cx: i32, cz: i32) -> bool {
+    let (u, d) = geo.ud(f64::from(cx) * 16.0 + 8.0, f64::from(cz) * 16.0 + 8.0);
+    u.abs() <= QT_HALF + 8.0 && d >= -QT_OUT - 8.0 && d <= ts.reach + 16.0
 }
 
 /// A column's water top at second `t`, `x` blocks inland.
@@ -402,6 +407,9 @@ pub struct HandOff {
     pub poles: Vec<[f64; 2]>,
     pub siren: f32,
     pub seed: u32,
+    /// The coast's middle and the way inland from it (the sea the other way): the wave comes from the side the sea drew
+    /// back from, wherever the player has gone since (`on_sea_axis`).
+    pub sea: ([f64; 3], [f64; 2]),
 }
 thread_local! {
     static PENDING: RefCell<Option<HandOff>> = const { RefCell::new(None) };
@@ -411,6 +419,28 @@ thread_local! {
 pub fn set_pending(h: HandOff) {
     PENDING.with(|p| *p.borrow_mut() = Some(h));
 }
+/// The hand-over waiting, changed (the run-up worked out as the quake ends).
+pub fn with_pending(f: impl FnOnce(&mut HandOff)) {
+    PENDING.with(|p| {
+        if let Some(h) = p.borrow_mut().as_mut() {
+            f(h);
+        }
+    });
+}
+/// How many times its height at the coast a tsunami may run up the land at most.
+pub const QT_RUNUP: f64 = 3.0;
+/// The Tsunami's size (`TsGeo::k`) for a wave of size `k0` that runs up to the player's ground (`ground`, the first air
+/// over it) a couple of blocks deep as it holds there: `k0` if that is enough, up to `QT_RUNUP` times it.
+pub fn run_up_k(ts: &super::tsunami::TsGeo, ground: f64, k0: f64) -> f64 {
+    use super::tsunami::{TS_A, TS_LOW, TS_SEA};
+    // (the level the water holds at the player's place, over the target's ground, at the Tsunami's own size)
+    let hold = TS_A * ts.env(ts.dp, 0.0) * (1.0 - TS_LOW) - TS_SEA;
+    if hold <= 1.0 {
+        return k0;
+    }
+    let want = (ground - ts.t[1] + 2.0) / hold;
+    want.clamp(k0, (QT_RUNUP * k0).min(1.0))
+}
 pub fn take_pending() -> Option<HandOff> {
     PENDING.with(|p| p.borrow_mut().take())
 }
@@ -418,30 +448,46 @@ pub fn take_pending() -> Option<HandOff> {
 pub fn activate(h: HandOff) {
     ACTIVE.with(|p| *p.borrow_mut() = Some(h));
 }
+/// The coast of the Tsunami about to be fired for a quake (lib.rs's `fire_at`), if it is one.
+pub fn active_sea() -> Option<([f64; 3], [f64; 2])> {
+    ACTIVE.with(|p| p.borrow().as_ref().map(|h| h.sea))
+}
+/// Where the Tsunami takes the player to be, so that its wave comes in from the sea the quake drew back (`HandOff::sea`):
+/// on the line inland from the coast's middle, as far inland as they are (at least a little), at their height.
+pub fn on_sea_axis(t: [f64; 3], nm: [f64; 2], me: [f64; 3]) -> [f64; 3] {
+    let d = ((me[0] - t[0]) * nm[0] + (me[2] - t[2]) * nm[1]).max(24.0);
+    [t[0] + d * nm[0], me[1], t[2] + d * nm[1]]
+}
 pub fn take_active() -> Option<HandOff> {
     ACTIVE.with(|p| p.borrow_mut().take())
 }
 
-/// The coast's disaster-prevention radio, from its poles: each broadcast a chime, then the siren in the JMA's pattern
-/// (a Major Tsunami Warning's 3 s on and 2 s off six times, a Tsunami Warning's 5 s on and 6 s off four), a closing
-/// chime, a pause, again, from `from` to `until`. Every pole is its own station: started a few seconds apart from the
-/// next (each town's set off on its own), heard late by its distance (at 343 a second) and fainter, the far ones
-/// muffled and echoing (`_far`), so near the coast one wails loud and others answer from further off. `vol` the player's
-/// siren volume (1 as made); none at all at 0.
+/// How loud a pole's sounds are where they are made, at the player's 100% (the game takes a volume over 1 as more
+/// reach, not more loudness: a pole's sounds fade out linearly over their `attenuation_distance`, 400, in sounds.json).
+pub const QT_POLE_VOL: f32 = 0.55;
+/// A broadcast's whole cycle (seconds): the siren twice, then its announcement spoken, then again (Oiso's poles on 30
+/// July 2025, the Kamchatka M8.8's Tsunami Warning: blasts 11 s apart, some 12 s of voice, the next at 31 s).
+pub const QT_CYCLE: f64 = 31.0;
+
+/// The coast's disaster-prevention radio, from its poles, as a town's sounds in life: no chime, the siren twice in the
+/// JMA's pattern (a Major Tsunami Warning's 3 s on and 2 s off: `quake.major`, two blasts, twice; a Tsunami Warning's
+/// 5 s on and 6 s off: `siren5`, twice), then the pause its announcement is spoken in, and again every `QT_CYCLE`,
+/// from `from` to `until`. Every pole is its own station: started some seconds apart from the next (each town's
+/// set off on its own), heard late by its distance (at 343 a second) and fainter, the far ones muffled and echoing
+/// (`_far`), so near the coast one wails while others answer from further off. `vol` the player's siren volume (1 as
+/// made); none at all at 0.
 #[allow(clippy::too_many_arguments)]
 pub fn sirens(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], from: f64, until: f64, major: bool, vol: f32, seed: u32) {
     if vol <= 0.0 {
         return;
     }
-    let (blast, every, n) = if major { ("siren3", 5.0, 6) } else { ("siren5", 11.0, 4) };
-    let cycle = 4.5 + every * f64::from(n) + 2.5 + 9.0;
+    let (blast, every) = if major { ("major", 10.0) } else { ("siren5", 11.0) };
     for (k, &[x, z]) in poles.iter().enumerate() {
         let d = (x - me[0]).hypot(z - me[2]);
         let far = if d > 140.0 { "_far" } else { "" };
-        let late = super::mh(k as u32, seed, 0x5a1) * 5.0 + d / 343.0;
+        let late = super::mh(k as u32, seed, 0x5a1) * 8.0 + d / 343.0;
         let at = Some([x, y + 9.0, z]);
-        // (heard as far as 16 blocks a unit of volume: some 260 at the player's 100%)
-        let v = 16.0 * vol;
+        let v = QT_POLE_VOL * vol;
         let push = |p: &mut Plan, t: f64, ev: &str| {
             if t >= from && t < until + 6.0 {
                 p.ev.push((t as f32, Act::Sound { event: format!("orbital:quake.{ev}{far}"), at, volume: v, pitch: 1.0 }));
@@ -449,12 +495,9 @@ pub fn sirens(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], from: f64,
         };
         let mut c = from + late;
         while c < until {
-            push(p, c, "chime_up");
-            for i in 0..n {
-                push(p, c + 4.5 + every * f64::from(i), blast);
-            }
-            push(p, c + 4.5 + every * f64::from(n), "chime_down");
-            c += cycle;
+            push(p, c, blast);
+            push(p, c + every, blast);
+            c += QT_CYCLE;
         }
     }
     // (and further off still, past the poles: the player's own recording of a coast's sirens, if they put one in, faint)
@@ -474,9 +517,7 @@ pub fn eew_alert(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], t: f64,
         let d = (x - me[0]).hypot(z - me[2]);
         let far = if d > 140.0 { "_far" } else { "" };
         let late = super::mh(k as u32, seed, 0x5a2) * 1.5 + d / 343.0;
-        for r in 0..2 {
-            p.ev.push(((t + late + 2.8 * f64::from(r)) as f32, Act::Sound { event: format!("orbital:quake.eew{far}"), at: Some([x, y + 9.0, z]), volume: 16.0 * vol, pitch: 1.0 }));
-        }
+        p.ev.push(((t + late) as f32, Act::Sound { event: format!("orbital:quake.eew{far}"), at: Some([x, y + 9.0, z]), volume: 0.8 * QT_POLE_VOL * vol, pitch: 1.0 }));
     }
 }
 

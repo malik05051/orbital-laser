@@ -456,12 +456,15 @@ laser, command, capability and timing). This file is the short, factual version 
   hand-over and the quake's own `Act::Cleanup`s put the sea back. Custom quakes: `qk_set_custom` (index `QK_CUSTOM`,
   `qk_quake`; the pass draws the nearest preset, `qk_pass_preset`), `/orbital quake custom MW DEPTH [SHINDO]`, kept as
   `customquake=`. Settings reach the plan through `qk_configure` (`QkConfig`: the countdown, the siren volume,
-  `/orbital sirenvolume`). Siren poles (`siren_sites`, six; `siren_pole`: iron bars, lightning-rod horns; a column with a
+  `/orbital sirenvolume`). The violence over 6+ and 7 (`qk_violence`, the pass's in step), the knockback's shoves
+  from 5.8 (`qk_second`); aftershocks (`qk_aftershocks`, `After`) in the pass's table (`qk_table`, `QK_TAB_*`, mod_data)
+  with the sea's drawing back, which the pass draws as a wet bed; the hand-over's wave size is set as the quake ends to
+  run up to the player's ground (`run_up_k`, `QT_RUNUP`, a `world.surface-height` survey). Siren poles (`siren_sites`, six; `siren_pole`: iron bars, lightning-rod horns; a column with a
   lightning rod is left alone by the quake and the sea) are built at the start with the terrain on; `sirens` and
   `eew_alert` play the disaster radio from them, each pole its own station (a few seconds' offset, late and fainter by
   its distance, `_far` muffled past 140), in the JMA's patterns; the sounds by `tools/sounds_quake.py` (`quake.siren3`,
-  `siren5`, `chime_up`, `chime_down`, `eew`, each with `_far`); `quake.nhk_alert` and `quake.siren` are the user's own
-  recordings, git-ignored. The pass sways the whole picture by the shaking where the camera is (never a pixel by where it
+  `siren5`, `chime_up`, `chime_down`, `eew`, each with `_far`); `quake.nhk_alert`, `quake.siren` and `quake/eew.ogg` (with `eew_far`, which `build_mod.py`
+  puts in for `quake.eew` when present) are the user's own recordings, git-ignored. The pass sways the whole picture by the shaking where the camera is (never a pixel by where it
   is in the world). Keep earthquake.wgsl's `QK_*`, `qk_preset` and `qk_pulse` in step with `QK_PRESETS` and
   `QkGeo`; its params: the strike in [6], the player in [12..15], the preset in [15]. Its other sounds are approved ones (the
   Sinkhole's, the Supervolcano's, the Sky Breaks' and the Tsunami's). Tests `quake_*`, `qk_sea_*`; `qk_print_table`
@@ -486,7 +489,8 @@ laser, command, capability and timing). This file is the short, factual version 
   changed.
 - The Windows test build (`orbital-laser-windows-test.zip`): `python3 tools/package_windows.py` after
   `tools/build_mod.py` puts `dist/orbital` into the released zip's game (nothing is compiled for Windows; the mod is the
-  same everywhere). Never pack the Earthquake's two recordings into anything published.
+  same everywhere). Never pack the Earthquake's recordings into anything published. The `Windows build` workflow
+  (`.github/workflows/windows-build.yml`) does the same on every pull request and push to main, the zip its artifact.
 - Run `install.py` with the game closed. Don't touch the user's saves or settings beyond what it does.
 
 ## Commands

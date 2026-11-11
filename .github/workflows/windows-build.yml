@@ -1,0 +1,70 @@
+name: Windows build
+
+# The Windows test build, orbital-laser-windows-test.zip, made from this branch: the mod built from source
+# (tools/build_mod.py), put into the released Windows zip's game (tools/package_windows.py). Nothing is compiled for
+# Windows: the mod is the same on every platform, and the game is the release's own. The zip is the run's artifact;
+# installed and played as README-WINDOWS.txt in it says (prepare.bat once, then play.bat).
+# The Earthquake's optional recordings are git-ignored, so the zip has the synthesised sounds in their place.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust with the WebAssembly target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache the build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mod
+
+      - name: The fork's commit the mod is built against
+        id: fork
+        run: |
+          rev=$(grep -A2 'name = "horizon-mod-sdk"' mod/Cargo.lock | sed -n 's/^source = ".*#\([0-9a-f]*\)"$/\1/p')
+          test -n "$rev"
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+
+      - name: Cache cargo-horizon-mod
+        id: tool
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-horizon-mod
+          key: cargo-horizon-mod-${{ runner.os }}-${{ steps.fork.outputs.rev }}
+
+      - name: Install cargo-horizon-mod (the fork's, at the same commit as the SDK)
+        if: steps.tool.outputs.cache-hit != 'true'
+        run: cargo install --git https://github.com/Stink-O/horizon --rev ${{ steps.fork.outputs.rev }} cargo-horizon-mod --locked
+
+      - name: Build the mod
+        run: python3 tools/build_mod.py --cargo-horizon-mod ~/.cargo/bin/cargo-horizon-mod
+
+      - name: Package the Windows test build
+        run: python3 tools/package_windows.py
+
+      - name: Upload it
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbital-laser-windows-test
+          path: |
+            dist/orbital-laser-windows-test.zip
+            dist/orbital-laser-windows-test.zip.sha256
+          compression-level: 0
+          retention-days: 30

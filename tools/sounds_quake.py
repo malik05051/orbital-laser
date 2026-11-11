@@ -5,13 +5,22 @@ radio (bosai musen) as the mod plays it from its siren poles.
 - `siren3`, `siren5`: a motor siren's blast, spinning up to its wail, held, cut and spinning down: 3 s for a Major
   Tsunami Warning's pattern (3 s on, 2 s off), 5 s for a Tsunami Warning's (5 s on, 6 s off), as the municipalities'
   disaster-prevention plans give them.
+- `major`: a Major Tsunami Warning's siren as a pole sounds it, two 3 s blasts 2 s apart (8 s): the broadcast plays it
+  three times between its chimes. Your own recording can stand for it (`--major-recording`).
 - `chime_up`, `chime_down`: the four bell notes a broadcast opens and closes with.
 - `eew`: an alert tone for an earthquake early warning over the speakers (two tones, rapidly alternating: not NHK's).
 - each also `_far`: heard from a pole a long way off, muffled and smeared by the distance and what it bounced off.
 
 Writes Ogg Vorbis (mono, 48 kHz) into orbital-sounds/assets/orbital/sounds/quake/synth/ with ffmpeg.
     python3 tools/sounds_quake.py
+    python3 tools/sounds_quake.py --eew-recording PATH   # also your own EEW chime, as quake/eew.ogg and eew_far.ogg
+    python3 tools/sounds_quake.py --major-recording PATH # your own Major Tsunami Warning siren, quake/major.ogg
+
+`--eew-recording` (and `--major-recording`, a recording of a pole's Major Tsunami Warning siren) takes a recording of the Earthquake Early Warning's chime (someone else's: git-ignored, never
+published) and writes it beside the others' recordings with its far version; tools/build_mod.py then plays it for
+`quake.eew` (`quake.major`) in place of the synthesised one.
 """
+import argparse
 import pathlib
 import subprocess
 import tempfile
@@ -46,6 +55,16 @@ def siren(on):
     air = np.convolve(RNG.standard_normal(len(t)), np.ones(24) / 24, mode="same") * 0.08
     env = np.clip(speed * 1.15, 0, 1) ** 1.4
     return (tone * 0.32 + air) * env
+
+
+def major():
+    """Two 3 s blasts, 2 s apart: the Major Tsunami Warning's pattern, 8 s."""
+    b = siren(3.0)
+    out = np.zeros(int(8.1 * SR) + len(b))
+    for o in (0.0, 5.0):
+        i = int(o * SR)
+        out[i:i + len(b)] += b
+    return out[: int(9.6 * SR)]
 
 
 def bell(f, dur=1.6):
@@ -87,23 +106,48 @@ def far(x):
     return tail * 0.7
 
 
-def write(name, x):
+def write(name, x, out=OUT):
     x = x / max(1e-9, np.abs(x).max()) * 0.89
-    OUT.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".wav") as w:
         with wave.open(w.name, "wb") as f:
             f.setnchannels(1)
             f.setsampwidth(2)
             f.setframerate(SR)
             f.writeframes((x * 32767).astype("<i2").tobytes())
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", w.name, "-c:a", "libvorbis", "-q:a", "5", str(OUT / f"{name}.ogg")], check=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", w.name, "-c:a", "libvorbis", "-q:a", "5", str(out / f"{name}.ogg")], check=True)
     print(f"{name}.ogg {len(x) / SR:.2f} s")
 
 
+def load(path):
+    """A recording as mono floats at SR."""
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-ac", "1", "-ar", str(SR), "-f", "f32le", "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.float32).astype(np.float64)
+
+
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--eew-recording", help="your own recording of the EEW chime (kept out of the repository)")
+    ap.add_argument("--major-recording", help="your own recording of a Major Tsunami Warning siren (kept out too)")
+    args = ap.parse_args()
+    for path, name in [(args.eew_recording, "eew"), (args.major_recording, "major")]:
+        if not path:
+            continue
+        x = load(path)
+        # (trimmed of silence at its ends, a short fade so it never clicks; its clipped peaks brought under full scale)
+        on = np.flatnonzero(np.abs(x) > 0.01)
+        x = x[on[0]:on[-1] + 1] if len(on) else x
+        f = np.minimum(1.0, np.arange(len(x))[::-1] / (0.03 * SR))
+        x = np.tanh(x * f * 1.2)
+        rec = OUT.parent
+        write(name, x, rec)
+        write(f"{name}_far", far(x), rec)
+    if args.eew_recording or args.major_recording:
+        return
     sounds = {
         "siren3": siren(3.0),
         "siren5": siren(5.0),
+        "major": major(),
         "chime_up": chime([349.2, 440.0, 523.3, 698.5]),
         "chime_down": chime([698.5, 523.3, 440.0, 349.2]),
         "eew": eew(),

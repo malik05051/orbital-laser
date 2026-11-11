@@ -651,8 +651,8 @@ impl Orbital {
             self.tsunami_time,
             self.siren_volume,
             {
-                let q = strike::qk_quake(strike::QK_CUSTOM);
-                format!("{},{},{}", q.mw, q.depth, q.shindo)
+                let (mw, depth, sh) = strike::qk_custom_inputs();
+                format!("{mw},{depth},{}", sh.map_or("auto".to_string(), |s| s.to_string()))
             },
             if self.knock { "on" } else { "off" },
             if self.carry_turn { "turn" } else { "still" },
@@ -734,9 +734,11 @@ impl Orbital {
                 Some(("quake", v)) => quake = if v == "custom" { strike::QK_CUSTOM } else { strike::qk_preset(v).unwrap_or(0) },
                 Some(("sirenvolume", v)) => siren_volume = v.parse::<u32>().map_or(100, |n| n.min(200)),
                 Some(("customquake", v)) => {
-                    let n: Vec<f64> = v.split(',').filter_map(|x| x.parse().ok()).collect();
-                    if let [mw, depth, shindo] = n[..] {
-                        strike::qk_set_custom(mw, depth, Some(shindo));
+                    let n: Vec<&str> = v.split(',').collect();
+                    if let [mw, depth, shindo] = n[..]
+                        && let (Ok(mw), Ok(depth)) = (mw.parse::<f64>(), depth.parse::<f64>())
+                    {
+                        strike::qk_set_custom(mw, depth, shindo.parse::<f64>().ok());
                     }
                 }
                 Some(("tsunamitime", v)) => tsunami_time = v.parse::<u32>().ok().map_or(strike::QT_COUNTDOWN as u32, |n| n.clamp(10, strike::QT_COUNTDOWN_MAX as u32)),
@@ -978,6 +980,13 @@ impl Orbital {
                 self.quake = k.min(strike::QK_CUSTOM);
                 self.save();
                 world::play_sound("minecraft:ui.button.click", None, 0.6, 1.3);
+                self.show_wheel();
+            }
+            Some(wheel::Spot::QkStep(f, d)) => {
+                strike::qk_custom_step(f, d);
+                self.quake = strike::QK_CUSTOM;
+                self.save();
+                world::play_sound("minecraft:ui.button.click", None, 0.6, if d > 0 { 1.5 } else { 1.1 });
                 self.show_wheel();
             }
             Some(wheel::Spot::Crease(k)) => {
@@ -1238,6 +1247,11 @@ impl Orbital {
         let player = game::get_player();
         let dimension = player.as_ref().map_or("minecraft:overworld".to_string(), |p| p.dimension.clone());
         let me = player.as_ref().map_or([point[0], point[1], point[2] + 1.0], |p| [p.x, p.y, p.z]);
+        // (an Earthquake's tsunami comes in from the sea the quake drew back, wherever the player has gone since)
+        let me = match strike::qk_active_sea() {
+            Some((t, nm)) if laser.key == "tsunami" => strike::qk_on_sea_axis(t, nm, me),
+            _ => me,
+        };
         let target = Target { block: [block[0], block[1], block[2]], point: [point[0], point[1], point[2]] };
         let clock = game::get_clock().map_or(0, |c| c.game_time);
         // a fresh look every strike, unless one is held (`/orbital seed`)

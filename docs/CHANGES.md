@@ -16,6 +16,34 @@ What each release of Orbital Laser added, newest first. The current release is i
   12 m for Tohoku). J-Alert siren poles along the coast sound Japan's disaster-prevention radio in the JMA's siren
   patterns, each pole its own station, near and far (`/orbital sirenvolume`). `/orbital quake custom MAGNITUDE DEPTH
   [SHINDO]` for your own earthquake. The whole picture sways with the shaking. Fork only for now (greyed out natively).
+- The Earthquake's Shindo 7 is violent now, as the JMA's table has it (from 6+ no one stays standing; at 7 people are
+  thrown): the picture's sway and the camera's jolts grow steeply over 6+ and 7 (`qk_violence`), sudden hard jerks
+  win over the rolling, and with KNOCKBACK on (now on the Earthquake's wheel too) the shaking knocks the player about,
+  off their feet at 7. More houses come down at 7 (most wooden ones, many reinforced), more cracks.
+- Aftershocks (`qk_aftershocks`): Omori's law for their times, Gutenberg and Richter's for their sizes, the largest
+  about 1.2 under the main shock (Båth's law); each felt at its own Shindo with its rumble and its sway, an Earthquake
+  Early Warning before the strong ones, the actionbar saying `AFTERSHOCK · SHINDO … · M…`.
+- The Earthquake Early Warning's chime can be your own recording (`tools/sounds_quake.py --eew-recording PATH`,
+  git-ignored like the other two; `build_mod.py` plays it for `quake.eew`), for the alert in your pocket and from
+  the siren poles.
+- The custom earthquake on the wheel: a row under the presets with MAGNITUDE, DEPTH and SHINDO steps (`qk_custom_step`,
+  AUTO kept as `auto` in the settings).
+- Shindo 6+ and 7 throw the furniture (`Pal::furn`, falling blocks, at most `QK_THROW_MAX`) and fling what lies loose
+  round the player.
+- The quake's tsunami comes from the side the sea drew back from, wherever the player has gone (`HandOff::sea`,
+  `on_sea_axis`): it used to take its way from where they stood when it came.
+- The sirens as Oiso's sounded on 30 July 2025 (the Kamchatka M8.8's Tsunami Warning): no chime, the siren twice, then
+  the announcement's pause, every 31 s (`QT_CYCLE`); no chime before NHK's alert either.
+- The poles' sirens and alerts are quieter and fade out with distance (`QT_POLE_VOL`, 400 blocks: a volume over 1
+  had made them heard at full strength kilometres off); a Major Tsunami Warning's siren is `quake.major` (two 3 s
+  blasts 2 s apart, three times a broadcast; your own recording with `--major-recording`); each broadcast leaves a
+  pause for its spoken announcement (`QT_VOICE`) and the poles start further apart.
+- The tsunami: no more "SEA WITHDRAWING" messages, only the JMA's warning and its countdown. The sea draws back further
+  (7 blocks for Tohoku) and is seen going: the bared bed glistens wet, water streams off it back out to sea. The wave
+  runs up the land to where the player stands, up to three times its height at the coast (`run_up_k`, `QT_RUNUP`);
+  higher ground than that stays dry.
+- A `Windows build` workflow: every pull request and push to main builds the mod and the Windows test zip, as the
+  run's artifact.
 - `tools/package_windows.py`: the Windows test build with this checkout's mod in it (the game from the release's
   Windows zip, the mod from `dist/orbital`; the Earthquake's two recordings left out).
 

@@ -12,7 +12,7 @@ content (the items, their textures and models, and the sounds) into one mod fold
 `cargo horizon-mod` comes from the Horizon fork with the input, ui, render and world mod interfaces
 (cargo install --git https://github.com/Stink-O/horizon --branch mod-api-input-ui-render-world cargo-horizon-mod).
 """
-import argparse, shutil, subprocess, sys, zipfile
+import argparse, json, shutil, subprocess, sys, zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -41,6 +41,18 @@ shutil.copytree(ROOT / "orbital-laser-mod" / "data", OUT / "data")
 sounds = ROOT / "orbital-sounds" / "assets" / "orbital"
 shutil.copy(sounds / "sounds.json", OUT / "assets" / "orbital" / "sounds.json")
 shutil.copytree(sounds / "sounds", OUT / "assets" / "orbital" / "sounds")
+# the player's own recordings (git-ignored) in place of the synthesised sounds, where they put one in: the events point
+# at them in the built sounds.json (tools/package_windows.py points them back when it leaves the recordings out)
+RECORDED = {e: (f"quake/synth/{n}", f"quake/{n}") for n in ("eew", "eew_far", "major", "major_far") for e in [f"quake.{n}"]}
+sj = OUT / "assets" / "orbital" / "sounds.json"
+table = json.loads(sj.read_text())
+for event, (synth, rec) in RECORDED.items():
+    if (OUT / "assets" / "orbital" / "sounds" / f"{rec}.ogg").is_file() and event in table:
+        for snd in table[event]["sounds"]:
+            if snd.get("name") == f"orbital:{synth}":
+                snd["name"] = f"orbital:{rec}"
+        print(f"{event}: your recording ({rec}.ogg)")
+sj.write_text(json.dumps(table, indent=2) + "\n")
 size = sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file())
 print(f"built {OUT} ({size / 1e6:.1f} MB, mod.wasm {(OUT / 'mod.wasm').stat().st_size / 1e3:.0f} KB)")
 
