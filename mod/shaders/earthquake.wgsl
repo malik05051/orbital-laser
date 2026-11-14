@@ -36,11 +36,21 @@ fn qk_preset(i: i32) -> QkP {
         case 3: { return QkP(0, 7.0, 6.6, 3.0, 0.15, 180.0, -0.7, 3, 46.0); }
         case 4: { return QkP(1, 7.5, 6.7, 5.0, 0.25, 220.0, -0.1, 3, 48.0); }
         case 5: { return QkP(2, 9.5, 6.8, 25.0, 0.8, 520.0, -0.9, 5, 100.0); }
-        default: { return QkP(2, 9.1, 6.7, 30.0, 0.55, 420.0, -0.1, 4, 80.0); }
+        default: { return QkP(2, 9.1, 6.7, 30.0, 0.55, 420.0, -0.1, 6, 380.0); }
     }
 }
-// A preset's subevent k: (seconds after the first, share of the strongest, seconds it lasts).
+// The strike's subevent k drawn as preset i's: its times and lengths stretched as long as the strike's run
+// (QK_TAB_TIME: a custom quake shaking as long as set).
+fn qk_stretch() -> f32 {
+    let s = qk_tab(QK_TAB_TIME);
+    return select(1.0, s, s > 0.01);
+}
 fn qk_pulse(i: i32, k: i32) -> vec3<f32> {
+    let s = qk_stretch();
+    return qk_pulse0(i, k) * vec3<f32>(s, 1.0, s);
+}
+// A preset's subevent k: (seconds after the first, share of the strongest, seconds it lasts).
+fn qk_pulse0(i: i32, k: i32) -> vec3<f32> {
     switch i {
         case 1: {
             switch k {
@@ -81,10 +91,12 @@ fn qk_pulse(i: i32, k: i32) -> vec3<f32> {
         }
         default: {
             switch k {
-                case 0: { return vec3<f32>(0.0, 0.45, 13.0); }
-                case 1: { return vec3<f32>(18.0, 1.0, 18.0); }
-                case 2: { return vec3<f32>(36.0, 0.6, 14.0); }
-                default: { return vec3<f32>(62.0, 0.22, 5.0); }
+                case 0: { return vec3<f32>(0.0, 0.4, 35.0); }
+                case 1: { return vec3<f32>(40.0, 1.0, 50.0); }
+                case 2: { return vec3<f32>(95.0, 0.8, 45.0); }
+                case 3: { return vec3<f32>(145.0, 0.5, 65.0); }
+                case 4: { return vec3<f32>(215.0, 0.3, 75.0); }
+                default: { return vec3<f32>(295.0, 0.15, 65.0); }
             }
         }
     }
@@ -153,6 +165,8 @@ fn qk_violence(i: f32) -> f32 {
 // it runs, the hand-over to the Tsunami, the sea's top water block).
 const QK_TAB_AFTER: u32 = 0u;
 const QK_TAB_SEA: u32 = 52u;
+// How much longer the strike's subevents run than the preset's drawn here (a custom quake shaking as long as set).
+const QK_TAB_TIME: u32 = 58u;
 fn qk_tab(i: u32) -> f32 {
     if (i >= arrayLength(&mod_data)) {
         return 0.0;
@@ -297,7 +311,8 @@ fn earthquake(in: StageIn) -> vec4<f32> {
     let gy = block_y() + 1.0;
     let sun = frame.sun.xyz;
     let day = saturate(sun.y * 2.5 + 0.35);
-    let fade = 1.0 - smoothstep(P.len - 6.0, P.len, t);
+    let len = P.len * qk_stretch();
+    let fade = 1.0 - smoothstep(len - 6.0, len, t);
 
     // ---- the shaking: the whole picture moved together, as a camera held in shaking hands (never a pixel by where it
     // is in the world: that tore the land into doubled, smeared bands at every edge in depth). How hard is where the

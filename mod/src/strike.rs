@@ -9,6 +9,8 @@ mod crystal;
 mod hu_blocks;
 mod fold;
 mod fold_land;
+mod gravity;
+pub use gravity::{Settle, reach as gv_reach};
 pub use fold::{FD_COPIES, FD_COPY_ON, FD_COPY_R, FD_HIDDEN, FD_LEAD, fd_hold_areas, FD_STAY, FD_TETHER, FD_TETHER_ON, FD_WARP_END, FD_WARP_START, FD_PATTERNS, fd_level, fd_lie, fd_pin, fd_survey};
 mod hurricane;
 mod nuke;
@@ -16,9 +18,11 @@ mod rod;
 mod payload;
 mod qk_sea;
 mod quake;
-pub use quake::{QK_CUSTOM, QK_PRESETS, QkConfig, QkGeo, qk_configure, qk_length, qk_pass_preset, qk_preset, qk_quake, qk_set_custom, shindo_class, qk_custom_inputs, qk_custom_step};
-pub use qk_sea::{QT_COUNTDOWN, QT_COUNTDOWN_MAX, activate as qk_activate, take_active as qk_take_active, take_pending as qk_take_pending, active_sea as qk_active_sea, on_sea_axis as qk_on_sea_axis};
-pub(crate) use tsunami::{ts_scale, ts_set_scale};
+pub use quake::{QK_CUSTOM, QK_DEPTH, QK_MW, QK_PRESETS, QK_SHAKING, QK_TSU_MW, QkConfig, QkCustom, QkGeo, qk_configure, qk_length, qk_pass_preset, qk_preset, qk_quake, qk_set_custom, shindo_class, qk_custom_inputs, qk_custom_step};
+pub use qk_sea::{QT_AUTO, QT_COUNTDOWN_MAX, auto_countdown as qk_auto_countdown, activate as qk_activate, take_active as qk_take_active, take_pending as qk_take_pending, active_sea as qk_active_sea, on_sea_axis as qk_on_sea_axis, sited as qk_sited};
+#[cfg(test)]
+pub(crate) use tsunami::TsConfig;
+pub(crate) use tsunami::{ts_config, ts_configure, ts_height_step, ts_height_text, ts_k_for, ts_scale, ts_set_scale};
 mod sb_hand;
 mod sb_lift;
 mod sb_lodge;
@@ -94,6 +98,10 @@ pub enum Act {
     Cmd(String),
     /// A sound following the player (`at` none), or at a point, heard only nearby.
     Sound { event: String, at: Option<[f64; 3]>, volume: f32, pitch: f32 },
+    /// A sound from places out in the world (a siren pole's), worked out as it plays from where the player is then: from
+    /// the nearest of `at`, heard only within `reach` of it, its far take (`far`) past `near`; with `here`, played where
+    /// the player is (a recording of a whole coast's sirens), as loud as the nearest place is near.
+    Heard { event: String, far: String, at: Vec<[f64; 3]>, volume: f32, near: f64, reach: f64, here: bool },
     /// A jolt of the real camera (`render.shake`): `strength` 0 to 1, fading out over `seconds`.
     Shake { strength: f32, seconds: f32 },
     /// The player knocked back by a blast's front (`world.push-player`, lib.rs's `knockback`): thrown away from `from`
@@ -4471,7 +4479,7 @@ mod tests {
             match act {
                 Act::Cmd(c) | Act::Spare(c) => out.push((t, c)),
                 Act::Blocks(b) => out.extend(b.as_fills().into_iter().map(|c| (t, c))),
-                Act::Sound { .. } | Act::Shake { .. } | Act::Shove { .. } | Act::Survey { .. } | Act::Read { .. } | Act::Words { .. } | Act::Data { .. } | Act::Table(_) | Act::Hand(_) => {}
+                Act::Sound { .. } | Act::Heard { .. } | Act::Shake { .. } | Act::Shove { .. } | Act::Survey { .. } | Act::Read { .. } | Act::Words { .. } | Act::Data { .. } | Act::Table(_) | Act::Hand(_) => {}
                 Act::Later(job) | Act::Soon(job) | Act::Cleanup(job) => ev.extend(job()),
             }
         }

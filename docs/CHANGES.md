@@ -4,6 +4,41 @@ What each release of Orbital Laser added, newest first. The current release is i
 
 ## Unreleased
 
+- **Gravity after a strike** (`/orbital gravity on|off`, the wheel's GRAVITY switch, on by default, kept): as a
+  gravity mod does (Realistic Block Physics and the like run only on Java editions, which Horizon can't load), once a
+  strike with the terrain on is over and its changes are in, the land round its target is read again and whatever it
+  left with nothing holding it up comes down: walls blown out at their foot, floors past their span (wood 5 blocks,
+  stone 7, glass 3, iron and obsidian 12), lumps of a crater's rim cut free, treetops over a lost trunk. The land's own
+  ground and logs hold if they are joined to it at all (caves, overhangs and trees stay); torches, doors, plants and
+  the like go with the block under them; chests and what holds things never move. Near the player it falls as
+  falling blocks (up to 480, their whole state kept), the rest is moved straight down. Every laser but the
+  Supervolcano. Leaves count with their tree: a crown left floating comes down with it. It looks only at what stands
+  over a gap and works a piece a tick, so it never comes near the game's limit for a mod's tick.
+- **Your own earthquake, further**: magnitude up to 50 and depth up to 1000 km; how long it shakes (the wheel's
+  SHAKING, `/orbital quakeshaking`: 10 s to 10 min, the rest after its rupture rolling and dying away), with SHINDO as
+  its strength; and whether it raises a tsunami (TSUNAMI YES or NO, `/orbital quaketsunami`; YES only from magnitude
+  6.5). Next to them, for every Earthquake, ARRIVAL sets its tsunami's first wave after the warning (AUTO 3 to 8
+  minutes, or 1 to 15) and SIRENS puts the J-Alert poles and their sounds on or off (`/orbital quakesirens`).
+- **Siren poles stand on land**: they were put a set distance inland of the target whatever was there, so some stood
+  in the sea. Each now goes up on the dry land nearest its place (the world asked where the land is round it), and its
+  sirens are heard from there; the Tsunami's own poles too.
+- **The Earthquake's land is counted at its real cost**: its chunks' work ran three times what the mod counted, so the
+  Tohoku quake's ticks used up to two thirds of the game's limit. Now about a third at most.
+- **The Tsunami's own wave height and sirens** (the wheel's WAVE HEIGHT and SIRENS row under the ring with the Tsunami
+  pointed at or loaded; `/orbital tsunamiheight BLOCKS|max`, `/orbital tsunamisirens on|off`; kept): the wave set to 2
+  to 120 blocks high at the coast (MAX as before), and the coast's J-Alert siren poles put up and sounding its warning
+  (a Major Tsunami Warning, a Tsunami Warning or an advisory by its height, with its title and countdown) when the
+  Tsunami is fired on its own. An Earthquake's tsunami keeps its own size and sirens.
+- **Sirens heard by where you are**: every siren pole's blast, the disaster radio's alert and your coast recording are
+  worked out as they play from where the player is then (`Act::Heard`): within 140 blocks of a pole its own sound,
+  further off its muffled far take, nothing past 400; walk away from the coast and they fade and stop, come back and
+  they are there again. Nothing of it follows the player any more.
+- **The Earthquake's tsunami as it comes in life**: its warning three minutes after the quake begins (the JMA's for
+  Tohoku), its first wave a strike's own three to eight minutes after that unless set (`/orbital tsunamitime SECONDS`,
+  `5m`, or `auto`, now the default; up to 15 minutes). Tohoku shakes for some six minutes, its rolling coda dying away
+  slowly. Sirens fade with height as with distance: flying high over a pole is as far from it as walking away.
+- **Trees topple in the Tsunami**: those it takes within 110 blocks of the player go over the way the water flows, as
+  falling blocks (logs and leaves, their state kept, up to 900 a strike) that land as blocks, instead of vanishing.
 - **The Earthquake**, the twentieth laser, on the wheel's fourth page and `/orbital earthquake`. No beam: a historic
   earthquake on the land round the target, picked on the wheel's QUAKE row or with `/orbital quake`: Tohoku 2011, Kobe
   1995, Kanto 1923, Kumamoto 2016, Noto 2024 or Valdivia 1960. Everything goes by the JMA Shindo scale: each place's

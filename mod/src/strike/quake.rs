@@ -126,8 +126,9 @@ pub const QK_PRESETS: [Quake; 6] = [
         hypo: -0.1,
         slip_h: 0,
         slip_v: 0,
-        // (two great packets of shaking some 50 s apart in the real records, compressed; an aftershock near the end)
-        pulses: &[(0.0, 0.45, 13.0), (18.0, 1.0, 18.0), (36.0, 0.6, 14.0), (62.0, 0.22, 5.0)],
+        // (some six minutes of it, as it was felt: the rupture's two great packets of shaking, the second the strongest,
+        // its long rolling coda dying away over minutes, an aftershock in it)
+        pulses: &[(0.0, 0.4, 35.0), (40.0, 1.0, 50.0), (95.0, 0.8, 45.0), (145.0, 0.5, 65.0), (215.0, 0.3, 75.0), (295.0, 0.15, 65.0)],
         tsunami: Some(Tsu {
             expect: "10 m+",
             draw: 7.0,
@@ -140,8 +141,8 @@ pub const QK_PRESETS: [Quake; 6] = [
         fires: 6,
         slides: 0.8,
         liquefy: 1.4,
-        length: 80.0,
-        blurb: "Mw 9.1 megathrust, Shindo 7: minutes of rolling shaking, then the sea.",
+        length: 380.0,
+        blurb: "Mw 9.1 megathrust, Shindo 7: six minutes of rolling shaking, then the sea.",
     },
     Quake {
         key: "kobe",
@@ -342,7 +343,7 @@ const QK_PART: usize = 8;
 /// Furniture thrown about at most, a chunk and a strike (each a falling block for a moment).
 const QK_THROW_CHUNK: usize = 24;
 const QK_THROW_MAX: u32 = 320;
-const QK_STAGE: u64 = 5_000_000;
+const QK_STAGE: u64 = 10_000_000;
 
 /// The shaking's strength on the game's camera (0 to 1, which the game squares) for instrumental intensity `i`.
 pub fn shake_of(i: f64) -> f64 {
@@ -773,8 +774,17 @@ fn sea_col(stack: &[u16], lo: i32, cur: &Cur) -> qk_sea::FCol {
 }
 
 /// One chunk's land: each column's new blocks as the slip moved it and the shaking left it, set against what was
-/// there; false if too little of it was loaded (asked again).
+/// there; false if too little of it was loaded (asked again). Counted at three times what its own counts say: timed
+/// natively it runs at some 7 counted a nanosecond, where the meter wants 20 (the game's ticks of it ran to 66% of
+/// their fuel).
 fn qk_chunk(w: &mut Work, cur: &Cur, k: usize, q: &mut Plan) -> bool {
+    let start = crate::meter::spent();
+    let ok = qk_chunk_work(w, cur, k, q);
+    crate::meter::spend(2 * crate::meter::spent().saturating_sub(start));
+    ok
+}
+
+fn qk_chunk_work(w: &mut Work, cur: &Cur, k: usize, q: &mut Plan) -> bool {
     let (cx, cz, due) = cur.chunks[k];
     let geo = w.geo.clone();
     let quake = geo.q;
@@ -1679,8 +1689,16 @@ fn qk_sea_warnings(p: &mut Plan, geo: &QkGeo, tsu: &qk_sea::Tsu, st: &qk_sea::Se
 /// `QK_TAB_*`: keep in step.
 pub const QK_TAB_AFTER: usize = 0;
 pub const QK_TAB_SEA: usize = 52;
-fn qk_table(q: &Quake, afters: &[After], sea: Option<qk_sea::SeaTime>) -> Vec<u32> {
-    let mut w = vec![0f32; QK_TAB_SEA + 6];
+/// How much longer the quake's subevents run than those of the preset the pass draws it as (`qk_pass_preset`: a custom
+/// one shaking as long as set; 1 for a preset).
+pub const QK_TAB_TIME: usize = 58;
+/// Seconds from the first subevent's start to the end of the last that shakes (its aftershock-like tail left out).
+fn qk_span(q: &Quake) -> f32 {
+    q.pulses.iter().filter(|p| p.1 > 0.2 + 1e-6 || p.1 < 0.2 - 1e-6).map(|p| p.0 + p.2).fold(1.0, f32::max)
+}
+fn qk_table(q: &Quake, preset: usize, afters: &[After], sea: Option<qk_sea::SeaTime>) -> Vec<u32> {
+    let mut w = vec![0f32; QK_TAB_TIME + 1];
+    w[QK_TAB_TIME] = if preset < QK_CUSTOM { 1.0 } else { qk_span(q) / qk_span(&QK_PRESETS[qk_pass_preset(preset)]) };
     let n = afters.len().min(QK_AFTER_MAX);
     w[QK_TAB_AFTER] = n as f32;
     for (k, a) in afters.iter().take(n).enumerate() {
@@ -1705,7 +1723,7 @@ pub struct QkConfig {
 thread_local! {
     static CONFIG: std::cell::Cell<QkConfig> = const { std::cell::Cell::new(QkConfig { countdown: qk_sea::QT_COUNTDOWN, siren: 1.0 }) };
     static CUSTOM: std::cell::Cell<Option<&'static Quake>> = const { std::cell::Cell::new(None) };
-    static CUSTOM_IN: std::cell::Cell<(f64, f64, Option<f64>)> = const { std::cell::Cell::new((7.0, 10.0, None)) };
+    static CUSTOM_IN: std::cell::Cell<QkCustom> = const { std::cell::Cell::new(QkCustom::DEFAULT) };
 }
 pub fn qk_configure(c: QkConfig) {
     CONFIG.with(|x| x.set(c));
@@ -1720,20 +1738,65 @@ pub const QK_CUSTOM: usize = QK_PRESETS.len();
 pub fn qk_quake(i: usize) -> &'static Quake {
     if i >= QK_CUSTOM {
         // (a shallow M7.0 until the player sets one)
-        return CUSTOM.with(std::cell::Cell::get).unwrap_or_else(|| qk_set_custom(7.0, 10.0, None));
+        return CUSTOM.with(std::cell::Cell::get).unwrap_or_else(|| qk_set_custom(QkCustom::DEFAULT));
     }
     &QK_PRESETS[i]
 }
 
-/// A custom earthquake from a moment magnitude, its depth (km) and the highest Shindo over it (instrumental, 0 to 7; none:
-/// worked out from the other two), its other traits as such a quake has them: a megathrust (offshore, a tsunami) from
-/// Mw 7.6 at 60 km or shallower, a fault breaking the surface when shallower than 15 km, otherwise buried; its rupture as
-/// long as Wells and Coppersmith's (1994) regression has it (log L = 0.59 Mw - 2.44), as many subevents as its size,
-/// its tsunami's height by its magnitude and depth. Made once for each set of numbers and kept.
-pub fn qk_set_custom(mw: f64, depth: f64, shindo: Option<f64>) -> &'static Quake {
-    let mw = (mw.clamp(5.0, 9.6) * 10.0).round() / 10.0;
-    let depth = depth.clamp(1.0, 700.0);
-    CUSTOM_IN.with(|c| c.set((mw, depth, shindo.map(|s| s.clamp(0.5, 7.0)))));
+/// The custom earthquake's magnitudes, depths (km) and seconds of shaking, lowest and highest; and the magnitude a
+/// tsunami may be asked for from.
+pub const QK_MW: (f64, f64) = (5.0, 50.0);
+pub const QK_DEPTH: (f64, f64) = (1.0, 1000.0);
+pub const QK_SHAKING: (f64, f64) = (10.0, 600.0);
+pub const QK_TSU_MW: f64 = 6.5;
+
+/// What the player sets the custom earthquake to (the wheel's custom rows, `/orbital quake custom`, `quakeshaking`,
+/// `quaketsunami`; kept in the settings).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct QkCustom {
+    /// Moment magnitude.
+    pub mw: f64,
+    /// Kilometres down to the rupture.
+    pub depth: f64,
+    /// How hard it shakes: the highest Shindo over it, instrumental (none: worked out from the other two).
+    pub shindo: Option<f64>,
+    /// Seconds it shakes (none: as long as a quake its size does).
+    pub shaking: Option<f64>,
+    /// It raises a tsunami (asked for; only from `QK_TSU_MW` up: `has_tsunami`).
+    pub tsunami: bool,
+}
+impl QkCustom {
+    pub const DEFAULT: QkCustom = QkCustom { mw: 7.0, depth: 10.0, shindo: None, shaking: None, tsunami: false };
+    /// A custom earthquake with a tsunami as a quake like it has one: a megathrust's, Mw 7.6 and up at 60 km or
+    /// shallower (the settings from before it could be asked for).
+    pub fn new(mw: f64, depth: f64, shindo: Option<f64>) -> QkCustom {
+        QkCustom { mw, depth, shindo, shaking: None, tsunami: mw >= 7.6 && depth <= 60.0 }
+    }
+    /// Its numbers each brought within their bounds.
+    fn clamped(self) -> QkCustom {
+        QkCustom {
+            mw: (self.mw.clamp(QK_MW.0, QK_MW.1) * 10.0).round() / 10.0,
+            depth: self.depth.clamp(QK_DEPTH.0, QK_DEPTH.1),
+            shindo: self.shindo.map(|s| s.clamp(0.5, 7.0)),
+            shaking: self.shaking.map(|s| s.clamp(QK_SHAKING.0, QK_SHAKING.1).round()),
+            tsunami: self.tsunami,
+        }
+    }
+    /// It raises a tsunami: asked for, and big enough (Mw 6.5 and up).
+    pub fn has_tsunami(&self) -> bool {
+        self.tsunami && self.mw >= QK_TSU_MW
+    }
+}
+
+/// A custom earthquake (`QkCustom`), its other traits as such a quake has them: a megathrust offshore when it raises
+/// a tsunami, otherwise a fault breaking the surface when shallower than 15 km, or buried; its rupture as long as Wells
+/// and Coppersmith's (1994) regression has it (log L = 0.59 Mw - 2.44), as many subevents as its size, shaking as long
+/// as that rupture takes or as long as set (its rupture's subevents, then a rolling coda dying away over the rest), its
+/// tsunami's height by its magnitude and depth. Kept until the next is set.
+pub fn qk_set_custom(c: QkCustom) -> &'static Quake {
+    let c = c.clamped();
+    CUSTOM_IN.with(|x| x.set(c));
+    let QkCustom { mw, depth, shindo, shaking, .. } = c;
     let shindo = shindo.unwrap_or_else(|| {
         // (the near-field intensity a quake like it brings, close over a shallow one, far less over a deep one)
         let x = depth.max(3.0);
@@ -1741,7 +1804,7 @@ pub fn qk_set_custom(mw: f64, depth: f64, shindo: Option<f64>) -> &'static Quake
         (2.68 + 1.72 * (0.58 * mw.min(8.3) - 1.29 - (x + 0.0028 * 10f64.powf(0.5 * mw.min(8.3))).log10() - 0.002 * x + 0.55)).clamp(1.0, 7.0)
     });
     let shindo = shindo.clamp(0.5, 7.0);
-    let mega = mw >= 7.6 && depth <= 60.0;
+    let mega = c.has_tsunami();
     let fault = if mega {
         Fault::Megathrust
     } else if depth < 15.0 {
@@ -1750,18 +1813,31 @@ pub fn qk_set_custom(mw: f64, depth: f64, shindo: Option<f64>) -> &'static Quake
         Fault::Megathrust
     };
     let kpb = (0.15 * 10f64.powf((mw - 6.9) * 0.33)).clamp(0.08, 0.9);
-    let len_km = 10f64.powf(0.59 * mw - 2.44);
+    let len_km = 10f64.powf(0.59 * mw.min(10.0) - 2.44);
     let half = (len_km / 2.0 / kpb).clamp(60.0, 520.0);
-    // (its rupture's real seconds, sped up as the presets are)
-    let dur = ((len_km / 2.5) / 3.0).clamp(5.0, 90.0) as f32;
+    // (its rupture's real seconds, sped up as the presets are; the shaking as long as that, or as set)
+    let rupture = ((len_km / 2.5) / 3.0).clamp(5.0, 90.0) as f32;
+    let span = shaking.map_or(rupture, |s| s as f32);
+    let main = rupture.min(span);
     let n = (1.0 + (mw - 6.5) * 1.5).clamp(1.0, 4.0) as usize;
     let shares = [0.7f32, 1.0, 0.65, 0.5];
-    let mut pulses: Vec<(f32, f32, f32)> = (0..n).map(|i| (dur * i as f32 / n as f32, if n == 1 { 1.0 } else { shares[i] }, (dur / n as f32).max(5.0) * 1.3)).collect();
-    pulses.push((dur + 10.0, 0.2, 4.0));
-    let length = 2.0 + dur + 26.0;
+    let mut pulses: Vec<(f32, f32, f32)> = (0..n).map(|i| (main * i as f32 / n as f32, if n == 1 { 1.0 } else { shares[i] }, (main / n as f32).max(5.0) * 1.3)).collect();
+    // (shaking on past the rupture: rolling waves dying away, as Tohoku's six minutes did)
+    let rest = span - main;
+    if rest > 8.0 {
+        let k = ((rest / 45.0).ceil() as usize).clamp(1, 8);
+        let step = rest / k as f32;
+        for i in 0..k {
+            let frac = if k > 1 { i as f32 / (k - 1) as f32 } else { 0.0 };
+            pulses.push((main + step * i as f32, 0.55 * (1.0 - 0.75 * frac), step * 1.5));
+        }
+    }
+    pulses.push((span + 10.0, 0.2, 4.0));
+    let length = 2.0 + span + 26.0;
     let slip = if fault == Fault::StrikeSlip { 10f64.powf(0.5 * mw - 3.2).round().clamp(0.0, 5.0) as i32 } else { 0 };
     let tsunami = mega.then(|| {
-        let h = (2.0 * 10f64.powf(0.5 * (mw - 7.5)) * (1.0 - depth / 80.0)).clamp(0.5, 30.0);
+        // (a deep one raises far less of the sea, but some, as asked)
+        let h = (2.0 * 10f64.powf(0.5 * (mw.min(12.0) - 7.5)) * (1.0 - depth / 80.0).max(0.1)).clamp(0.5, 30.0);
         let expect: &'static str = match h {
             h if h > 10.0 => "10 m+",
             h if h > 5.0 => "10 m",
@@ -1805,33 +1881,48 @@ pub fn qk_set_custom(mw: f64, depth: f64, shindo: Option<f64>) -> &'static Quake
     q
 }
 
-/// What the player set the custom earthquake to: its magnitude, depth (km) and highest Shindo (none: worked out).
-pub fn qk_custom_inputs() -> (f64, f64, Option<f64>) {
+/// What the player set the custom earthquake to.
+pub fn qk_custom_inputs() -> QkCustom {
     let _ = qk_quake(QK_CUSTOM);
     CUSTOM_IN.with(std::cell::Cell::get)
 }
-/// The depths the wheel steps through (km), and the Shindos (none: worked out; then the JMA's classes' middles).
-pub const QK_DEPTHS: [f64; 17] = [1.0, 5.0, 10.0, 15.0, 20.0, 30.0, 40.0, 50.0, 60.0, 80.0, 100.0, 150.0, 200.0, 300.0, 400.0, 500.0, 700.0];
+/// The depths the wheel steps through (km), the Shindos (none: worked out; then the JMA's classes' middles), and the
+/// seconds of shaking (none: as long as its rupture).
+pub const QK_DEPTHS: [f64; 19] = [1.0, 5.0, 10.0, 15.0, 20.0, 30.0, 40.0, 50.0, 60.0, 80.0, 100.0, 150.0, 200.0, 300.0, 400.0, 500.0, 700.0, 850.0, 1000.0];
 pub const QK_SHINDOS: [Option<f64>; 10] = [None, Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(4.75), Some(5.25), Some(5.75), Some(6.25), Some(6.7)];
-/// The wheel's step of the custom earthquake: `field` 0 the magnitude (`dir` ±1 a tenth, ±2 a half), 1 the depth, 2 the
-/// Shindo (each to the next of its list).
+pub const QK_SHAKINGS: [Option<f64>; 14] = [None, Some(10.0), Some(20.0), Some(30.0), Some(45.0), Some(60.0), Some(90.0), Some(120.0), Some(180.0), Some(240.0), Some(300.0), Some(360.0), Some(480.0), Some(600.0)];
+/// The step in `list` from the one nearest `now` (none nearest none) the way `dir` points.
+fn qk_next<T: Copy>(list: &[Option<T>], now: Option<T>, dir: i8, dist: impl Fn(T, T) -> f64) -> Option<T> {
+    let at = list
+        .iter()
+        .enumerate()
+        .min_by(|a, b| {
+            let d = |x: &Option<T>| match (x, now) {
+                (None, None) => -1.0,
+                (Some(v), Some(n)) => dist(*v, n),
+                _ => f64::MAX,
+            };
+            d(a.1).total_cmp(&d(b.1))
+        })
+        .map_or(0, |x| x.0);
+    list[(at as i64 + i64::from(dir.signum())).clamp(0, list.len() as i64 - 1) as usize]
+}
+/// The wheel's step of the custom earthquake: `field` 0 the magnitude (`dir` ±1 a tenth, ±2 a quarter, a whole one
+/// from 10 up), 1 the depth, 2 the Shindo, 3 the seconds of shaking (each to the next of its list); 4 its tsunami asked
+/// for or not (only from Mw 6.5).
 pub fn qk_custom_step(field: u8, dir: i8) -> &'static Quake {
-    let (mw, depth, sh) = qk_custom_inputs();
-    let next = |len: usize, at: usize| (at as i64 + i64::from(dir.signum())).clamp(0, len as i64 - 1) as usize;
+    let mut c = qk_custom_inputs();
     match field {
-        0 => qk_set_custom(mw + f64::from(dir) * if dir.abs() >= 2 { 0.25 } else { 0.1 }, depth, sh),
-        1 => {
-            let at = QK_DEPTHS.iter().enumerate().min_by(|a, b| (a.1 - depth).abs().total_cmp(&(b.1 - depth).abs())).map_or(0, |x| x.0);
-            qk_set_custom(mw, QK_DEPTHS[next(QK_DEPTHS.len(), at)], sh)
+        0 => {
+            let big = if (dir > 0 && c.mw >= 10.0) || (dir < 0 && c.mw > 10.0) { 1.0 } else { 0.25 };
+            c.mw += f64::from(dir.signum()) * if dir.abs() >= 2 { big } else { 0.1 };
         }
-        _ => {
-            let at = QK_SHINDOS.iter().enumerate().min_by(|a, b| {
-                let d = |x: &Option<f64>| x.map_or(if sh.is_none() { -1.0 } else { 99.0 }, |v| (v - sh.unwrap_or(-50.0)).abs());
-                d(a.1).total_cmp(&d(b.1))
-            }).map_or(0, |x| x.0);
-            qk_set_custom(mw, depth, QK_SHINDOS[next(QK_SHINDOS.len(), at)])
-        }
+        1 => c.depth = qk_next(&QK_DEPTHS.map(Some), Some(c.depth), dir, |a, b| (a - b).abs()).unwrap_or(c.depth),
+        2 => c.shindo = qk_next(&QK_SHINDOS, c.shindo, dir, |a, b| (a - b).abs()),
+        3 => c.shaking = qk_next(&QK_SHAKINGS, c.shaking, dir, |a, b| (a - b).abs()),
+        _ => c.tsunami = c.mw >= QK_TSU_MW && !c.has_tsunami(),
     }
+    qk_set_custom(c)
 }
 
 /// The preset the pass draws earthquake `i` as (it knows the presets only): itself, or for the custom one the preset
@@ -1878,13 +1969,12 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
     let poles = qk_sea::siren_sites(&geo, me);
     qk_sounds(&mut p, &geo, me, &afters, &poles, cfg.siren);
     // what the pass reads: the aftershocks (its sway) and the sea drawing back (its wet bed)
-    p.ev.push((0.0, Act::Table(qk_table(quake, &afters, sea))));
+    p.ev.push((0.0, Act::Table(qk_table(quake, preset, &afters, sea))));
     // the coast's siren poles (built with the terrain on; heard either way), its earthquake alert from them as the warning
     // goes out, and with a tsunami its warnings and sirens
-    if terrain {
-        for (k, [x, z]) in poles.iter().enumerate() {
-            p.ev.push((0.5 + 0.05 * k as f32, Act::Blocks(Box::new(qk_sea::siren_pole(x.floor() as i32, z.floor() as i32)))));
-        }
+    // (none with its sirens off; on the dry land nearest their places, never in the sea)
+    if cfg.siren > 0.0 && terrain {
+        qk_sea::site_poles(&mut p, &poles, 0.2);
     }
     if quake.eew {
         qk_sea::eew_alert(&mut p, &poles, geo.t[1], me, f64::from(QK_T0) + 1.2, cfg.siren, geo.seed);
@@ -2011,21 +2101,70 @@ mod tests {
 
     #[test]
     fn quake_custom_takes_the_players_numbers_and_the_traits_of_such_a_quake() {
-        let q = qk_set_custom(9.0, 20.0, None);
+        let q = qk_set_custom(QkCustom::new(9.0, 20.0, None));
         assert!(q.fault == Fault::Megathrust && q.tsunami.is_some(), "a great shallow quake: a megathrust with a tsunami");
         assert!(q.shindo >= 6.0, "{}", q.shindo);
-        let q = qk_set_custom(6.5, 8.0, Some(6.25));
+        let q = qk_set_custom(QkCustom::new(6.5, 8.0, Some(6.25)));
         assert!(q.fault == Fault::StrikeSlip && q.tsunami.is_none() && q.ruptures());
         assert_eq!(q.top_class(), "6+");
-        let q = qk_set_custom(7.2, 300.0, None);
+        let q = qk_set_custom(QkCustom::new(7.2, 300.0, None));
         assert!(!q.ruptures() && q.tsunami.is_none(), "a deep one breaks nothing and raises no tsunami");
         assert!(q.shindo < 5.5, "a deep one shakes less: {}", q.shindo);
         assert!(std::ptr::eq(qk_quake(QK_CUSTOM), q));
-        for (mw, d) in [(9.6, 10.0), (5.0, 1.0), (8.0, 60.0)] {
-            qk_set_custom(mw, d, None);
-            assert!(qk_length(QK_CUSTOM, qk_sea::QT_COUNTDOWN_MAX) <= crate::lasers::EARTHQUAKE.length);
-            assert!(qk_pass_preset(QK_CUSTOM) < QK_CUSTOM);
+        for (mw, d) in [(9.6, 10.0), (5.0, 1.0), (8.0, 60.0), (50.0, 1.0), (50.0, 1000.0), (6.5, 1000.0)] {
+            for shaking in [None, Some(10.0), Some(600.0)] {
+                for tsunami in [false, true] {
+                    let q = qk_set_custom(QkCustom { mw, depth: d, shindo: None, shaking, tsunami });
+                    assert!(qk_length(QK_CUSTOM, qk_sea::QT_COUNTDOWN_MAX) <= crate::lasers::EARTHQUAKE.length, "{mw} {d} {shaking:?} {tsunami}");
+                    assert!(qk_pass_preset(QK_CUSTOM) < QK_CUSTOM);
+                    assert!(q.pulses.iter().all(|p| p.0.is_finite() && p.1 > 0.0 && p.2 > 0.0) && (0.5..=7.0).contains(&q.shindo));
+                    assert_eq!(q.tsunami.is_some(), tsunami && mw >= QK_TSU_MW, "a tsunami as asked, from Mw 6.5");
+                }
+            }
         }
+    }
+
+    #[test]
+    fn quake_custom_goes_to_magnitude_50_and_1000_km_and_a_tsunami_only_from_6_5() {
+        let q = qk_set_custom(QkCustom { mw: 80.0, depth: 5000.0, ..QkCustom::DEFAULT });
+        assert_eq!((q.mw, qk_custom_inputs().depth), (50.0, 1000.0));
+        // (a tsunami can't be asked for under 6.5: the step leaves it off, and one asked for before is dropped)
+        qk_set_custom(QkCustom { mw: 6.4, tsunami: false, ..QkCustom::DEFAULT });
+        assert!(qk_custom_step(4, 1).tsunami.is_none() && !qk_custom_inputs().has_tsunami());
+        qk_set_custom(QkCustom { mw: 6.5, tsunami: false, ..QkCustom::DEFAULT });
+        assert!(qk_custom_step(4, 1).tsunami.is_some());
+        assert!(qk_custom_step(0, -1).tsunami.is_none(), "6.4 again: none");
+        assert!(qk_custom_step(4, 1).tsunami.is_none() && qk_custom_step(4, 1).tsunami.is_none());
+        // (the magnitude's big steps go by whole ones from 10 up)
+        qk_set_custom(QkCustom { mw: 10.0, ..QkCustom::DEFAULT });
+        assert_eq!(qk_custom_step(0, 2).mw, 11.0);
+        assert_eq!(qk_custom_step(0, -2).mw, 10.0);
+        assert!((qk_custom_step(0, -2).mw - 9.8).abs() < 1e-9);
+        // (and the depth steps on to 1000 km)
+        qk_set_custom(QkCustom { depth: 700.0, ..QkCustom::DEFAULT });
+        assert_eq!(qk_custom_step(1, 1).date, "850 km deep");
+        assert_eq!(qk_custom_step(1, 1).date, "1000 km deep");
+        assert_eq!(qk_custom_step(1, 1).date, "1000 km deep");
+    }
+
+    #[test]
+    fn quake_custom_shakes_as_long_as_set() {
+        let shaken = |q: &Quake| q.pulses.iter().filter(|p| (p.1 - 0.2).abs() > 1e-6).map(|p| p.0 + p.2).fold(0.0f32, f32::max);
+        for s in [10.0, 45.0, 120.0, 360.0, 600.0] {
+            let q = qk_set_custom(QkCustom { mw: 8.0, shaking: Some(s), ..QkCustom::DEFAULT });
+            let end = shaken(q);
+            assert!((end - s as f32).abs() <= 0.3 * s as f32 + 6.0, "set {s} s, it shakes to {end}");
+            // (and the camera's shaking holds on through it, dying away: still felt at three quarters of it)
+            let g = QkGeo::new(QK_CUSTOM, &Target { block: [0, 64, 0], point: [0.5, 65.0, 0.5] }, [0.5, 66.0, 40.5], 17.0);
+            let (u, d) = g.ud(0.5, 40.5);
+            let (sa, _) = g.arrive(u, d);
+            if s >= 120.0 {
+                assert!(g.env(u, d, f64::from(QK_T0) + sa + 0.75 * s) > 0.05, "{s}");
+            }
+        }
+        // (none set: as long as its rupture, as before)
+        let q = qk_set_custom(QkCustom::new(7.0, 10.0, None));
+        assert!(shaken(q) < 40.0);
     }
 
     #[test]
