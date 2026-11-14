@@ -272,19 +272,24 @@ Twenty lasers, five to a page of the wheel.
   **To watch the tsunami form**, stand on high ground near the coast and face the sea (from you through the target and
   on out). Once the countdown ends, the wave rises out of the sea on the horizon and comes in across it to the coast.
 
-  **Your own earthquake**: on the wheel, the row under the presets sets it (clicking a step picks CUSTOM): MAGNITUDE
-  (`-`/`+` by 0.1, `<<`/`>>` by 0.25, 5.0 to 9.6), DEPTH (1 to 700 km) and SHINDO (AUTO works it out, or 1 to 7). Or
-  `/orbital quake custom MAGNITUDE DEPTH_KM [SHINDO]` (magnitude 5 to 9.6, depth 1 to 700 km,
-  the highest Shindo as 0 to 7 or a class like `6+`; left out, it is worked out from the other two), or the wheel's
-  **CUSTOM** button for the last one set. It takes the traits such a quake has: a megathrust offshore with a tsunami
-  from Mw 7.6 at 60 km or shallower, a fault tearing the surface when shallower than 15 km, otherwise buried; its
-  rupture as long, its shaking as long and in as many pulses as its size gives.
+  **Your own earthquake**: on the wheel, the two rows under the presets set it (clicking a step picks CUSTOM):
+  MAGNITUDE (`-`/`+` by 0.1, `<<`/`>>` by 0.25 and by 1 from 10; 5.0 to 50), DEPTH (1 to 1000 km), SHINDO, the
+  shaking's strength (AUTO works it out, or 1 to 7), SHAKING, how long it shakes (AUTO as long as its rupture, or 10 s
+  to 10 min, the last minutes rolling and dying away as Tohoku's did), and TSUNAMI, YES or NO (YES only from magnitude
+  6.5). Beside them, for every Earthquake: ARRIVAL, its tsunami's first wave after the warning (AUTO 3 to 8 minutes,
+  or 1 to 15), and SIRENS, the J-Alert poles on or off. Or `/orbital quake custom MAGNITUDE DEPTH_KM [SHINDO]`
+  (magnitude 5 to 50, depth 1 to 1000 km, the highest Shindo as 0 to 7 or a class like `6+`; left out, it is worked out
+  from the other two), `/orbital quakeshaking SECONDS|2m|auto`, `/orbital quaketsunami yes|no`, `/orbital quakesirens
+  on|off`, or the wheel's **CUSTOM** button for the last one set. It takes the traits such a quake has: a megathrust
+  offshore when it raises a tsunami, a fault tearing the surface when shallower than 15 km, otherwise buried; its
+  rupture as long and in as many pulses as its size gives.
 
-  **The tsunami** (Tohoku, Kanto, Noto, Valdivia, and a big shallow custom quake). **Aim at the coast**: the sea is taken
-  to lie beyond the target, at the sea's level (y 62), and the land inland towards you. As the shaking peaks the JMA's
-  **Major Tsunami Warning** goes out with its expected height ("10 m+" for Tohoku, "5 m" for Noto), and a **countdown**
-  to the first wave runs over the hotbar: `/orbital tsunamitime SECONDS` (10 to 300, kept; 60 by default), though it
-  never comes before the strong shaking is over. Then **the sea withdraws** (no message: you see it go), baring
+  **The tsunami** (Tohoku, Kanto, Noto, Valdivia, and a custom quake with TSUNAMI on). **Aim at the coast**: the sea is taken
+  to lie beyond the target, at the sea's level (y 62), and the land inland towards you. Three minutes after the quake
+  begins (as the JMA's was for Tohoku) its **Major Tsunami Warning** goes out with its expected height ("10 m+" for
+  Tohoku, "5 m" for Noto), and a **countdown** to the first wave runs over the hotbar: by default a strike's own three
+  to eight minutes, or the wheel's ARRIVAL or `/orbital tsunamitime SECONDS` (10 to 900, or minutes as `5m`; `auto` back to random; kept),
+  though it never comes before the strong shaking is over. Tohoku shakes for some six minutes. Then **the sea withdraws** (no message: you see it go), baring
   the seabed (real water taken out, the bed glistening wet, water streaming back out to sea),
   and **the wave comes**: the Tsunami strike itself, its animation, its surge over the land, its debris and its carry,
   but at the quake's own size, about 12 m for Tohoku instead of a wall hundreds of blocks high, sweeping only the land
@@ -293,7 +298,9 @@ Twenty lasers, five to a page of the wheel.
   the highest so far.
 
   **The coast's sirens.** Six J-Alert siren poles stand along the coast (an iron post with loudspeaker horns; built as
-  the strike starts with the terrain on, and they stay; four close to the target, two far off along the coast inland).
+  the strike starts with the terrain on, and they stay; four close to the target, two far off along the coast inland),
+  each on the dry land nearest its place, never in the sea. The wheel's SIRENS or `/orbital quakesirens off` leaves
+  them out, and their sounds with them.
   They sound as Japan's disaster-prevention radio does: a quake's early warning alert as it starts, and for a tsunami
   each broadcast a chime, the siren in the JMA's pattern (a Major Tsunami Warning's 3 s on and 2 s off, a Tsunami
   Warning's 5 s on and 6 s off), a closing chime, again and again until the wave has come. After each broadcast's closing chime comes a pause where its announcement is
@@ -532,8 +539,11 @@ The wheel also has:
 | `/orbital wheel` | opens the laser wheel |
 | `/orbital plasma`, `godly`, `blackhole`, `meteor`, `mothership`, `downfall`, `planetkiller`, `crystalbloom`, `sinkhole`, `payload`, `nuke`, `rod`, `supercell`, `hurricane`, `tsunami`, `fold`, `supervolcano`, `skybreak`, `carpetbomb`, `earthquake` | loads that laser |
 | `/orbital quake tohoku\|kobe\|kanto\|kumamoto\|noto\|valdivia` | which historic earthquake the Earthquake plays; kept; also the wheel's QUAKE row |
-| `/orbital quake custom MAGNITUDE DEPTH_KM [SHINDO]` | your own earthquake for the Earthquake: magnitude 5 to 9.6, depth 1 to 700 km, the highest Shindo (0 to 7, or 5-, 5+, 6-, 6+, 7); kept; also the wheel's CUSTOM button |
-| `/orbital tsunamitime SECONDS` | the countdown from an Earthquake's tsunami warning to its first wave, 10 to 300 (60 by default); kept |
+| `/orbital quake custom MAGNITUDE DEPTH_KM [SHINDO]` | your own earthquake for the Earthquake: magnitude 5 to 50, depth 1 to 1000 km, the highest Shindo (0 to 7, or 5-, 5+, 6-, 6+, 7); kept; also the wheel's CUSTOM button |
+| `/orbital quakeshaking SECONDS\|2m\|auto` | how long the custom earthquake shakes, 10 s to 10 min (`auto`: as long as its rupture); kept; the wheel's SHAKING |
+| `/orbital quaketsunami yes\|no` | whether the custom earthquake raises a tsunami (yes only from magnitude 6.5); kept; the wheel's TSUNAMI |
+| `/orbital quakesirens on\|off` | the Earthquake's J-Alert siren poles and their sounds (on by default); kept; the wheel's SIRENS |
+| `/orbital tsunamitime SECONDS\|5m\|auto` | the countdown from an Earthquake's tsunami warning (3 minutes after the quake) to its first wave, 10 to 900 seconds or minutes as `5m`; `auto` (the default) a strike's own 3 to 8 minutes; kept |
 | `/orbital sirenvolume PERCENT` | the Earthquake's sirens and disaster radio, 0 to 200 (100 by default; 0 none); kept |
 | `/orbital terrain on\|off` | terrain damage on, or off (light and sound only) |
 | `/orbital approach ahead\|behind\|left\|right\|overhead` | where the ship comes in from |
@@ -545,6 +555,9 @@ The wheel also has:
 | `/orbital quality full\|fast` | the Payload's, the Nuke's and the Rod's smoke, the Supercell's, the Hurricane's and the Tsunami's weather and water, the Supervolcano's ash cloud, the Sky Breaks' dust and the Carpet Bomb's smoke, dust and shockwaves at full size, or at half size (faster); also the wheel's QUALITY switch |
 | `/orbital impactframes kanada\|blackflash\|cinematic\|off` | the Rod from God's impact frames (a fifth of a second of hard cuts as it strikes) in one of three looks (Kanada is the default), or off; kept; also the wheel's IMPACT FX row |
 | `/orbital foldpattern a\|b\|c` | the Fold's crease pattern for its next strike: umbrella (the default), waterbomb or diagonal; kept, also the wheel's FOLD row |
+| `/orbital gravity on\|off` | gravity after a strike (on by default, kept): with the terrain on, once a strike is over, whatever it left with nothing holding it up comes down (walls blown out at their foot, floors past their span, lumps of land cut free), as falling blocks near you; also the wheel's GRAVITY switch |
+| `/orbital tsunamiheight BLOCKS\|max` | the Tsunami's own wave, its height at the coast (2 to 120 on the wheel, any 1 to 400 here; `max` as big as it comes, the default); kept; also the wheel's WAVE HEIGHT row with the Tsunami pointed at |
+| `/orbital tsunamisirens on\|off` | whether the coast's J-Alert siren poles go up and warn of the Tsunami fired on its own (on by default; kept); heard only near them, as all sirens now are; also the wheel's SIRENS switch |
 | `/orbital knockback on\|off` | the Nuke's, the Rod's, the Fold's and the Carpet Bomb's last blast's push on you as the blast reaches you, the Supervolcano's ash wall's shove (the camera's jolt stays), and whether the Hurricane's wind or the Tsunami's water carries you off; also the wheel's KNOCKBACK switch |
 | `/orbital carryview turn\|still` | while the Hurricane carries you, your view turns a little with you round the storm and sways with the gusts (`turn`, the default), or stays your own (`still`); kept |
 | `/orbital follow on\|off` | the follow camera: an orbit round the Nuke's or the Payload's bomb as it comes in. Your mouse sets the angle (the camera sits 70 blocks back along your view), it backs off as the burst nears and orbits the fireball and the cloud, then puts you back where you stood; also the wheel's FOLLOW switch. Pairs well with the Cinematic Camera key (Options > Controls > Key Binds > Miscellaneous) |

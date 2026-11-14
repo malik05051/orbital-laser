@@ -646,7 +646,7 @@ pub const EARTHQUAKE: Laser = Laser {
     rgb: 0xE8A33C,
     blurb: "A historic earthquake, by the Shindo scale: Tohoku, Kobe, Kanto, Kumamoto, Noto, Valdivia.",
     icon_model: "orbital:earthquake_icon",
-    length: 480.0,
+    length: 1100.0,
     range: 1000.0,
     scorch: &[],
     bowl_r: 10,

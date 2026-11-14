@@ -87,6 +87,73 @@ pub fn ts_set_scale(k: f64) {
 pub fn ts_scale() -> f64 {
     SCALE.with(std::cell::Cell::get)
 }
+
+/// The heights the Tsunami's own wave may be set to at the coast (the target's ground), blocks; past the last, MAX: as
+/// high as it comes (its height there at `k` 1).
+pub const TS_HEIGHTS: [u32; 15] = [2, 3, 5, 8, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100, 120];
+/// The Tsunami's own settings (`/orbital tsunamiheight`, `/orbital tsunamisirens`, the wheel's TSUNAMI row; kept): the
+/// wave's height at the coast (none: MAX), whether the coast's J-Alert siren poles sound its warning, and their volume
+/// (the player's siren volume, 1 as made).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TsConfig {
+    pub height: Option<u32>,
+    pub sirens: bool,
+    pub siren: f32,
+}
+thread_local! {
+    static CFG: std::cell::Cell<TsConfig> = const { std::cell::Cell::new(TsConfig { height: None, sirens: true, siren: 1.0 }) };
+}
+pub fn ts_config() -> TsConfig {
+    CFG.with(std::cell::Cell::get)
+}
+pub fn ts_configure(c: TsConfig) {
+    CFG.with(|s| s.set(c));
+}
+/// The wave's height a step up or down `TS_HEIGHTS` (±2: three steps), MAX past its top.
+pub fn ts_height_step(dir: i8) {
+    let mut c = ts_config();
+    let at = c.height.and_then(|h| TS_HEIGHTS.iter().position(|&v| v >= h)).unwrap_or(TS_HEIGHTS.len());
+    let by = if dir.abs() >= 2 { 3 } else { 1 } * i32::from(dir.signum());
+    let to = (at as i32 + by).clamp(0, TS_HEIGHTS.len() as i32) as usize;
+    c.height = TS_HEIGHTS.get(to).copied();
+    ts_configure(c);
+}
+/// The wave's height as the wheel and the panel say it.
+pub fn ts_height_text(h: Option<u32>) -> String {
+    h.map_or("MAX".to_string(), |h| format!("{h} m"))
+}
+/// The size (`TsGeo::k`) for the Tsunami's own wave `height` blocks high at the coast: its highest water over the
+/// target's ground, as the gauge reads it, is that (1, MAX, if it can't be that high).
+pub fn ts_k_for(target: &Target, me: [f64; 3], shader_seed: f32, height: Option<u32>) -> f64 {
+    let Some(h) = height else { return 1.0 };
+    let mut g = TsGeo::new(target, me, shader_seed);
+    g.k = 1.0;
+    let full = (0..900).filter_map(|k| g.level(0.0, 0.0, f64::from(k) * 0.05)).fold(0.0, f64::max);
+    if full <= 0.0 { 1.0 } else { (f64::from(h) / full).clamp(0.005, 1.0) }
+}
+/// The Tsunami's own warning from the coast's poles (`TsConfig::sirens`): a hand-over as an Earthquake's tsunami has,
+/// its poles along the coast a little inland of the target, its warning by the wave's height there.
+fn own_warning(geo: &TsGeo, me: [f64; 3], seed: u32, cfg: TsConfig) -> super::qk_sea::HandOff {
+    let mut poles: Vec<[f64; 2]> = [(-120.0, 0.0), (-40.0, 0.0), (40.0, 0.0), (120.0, 0.0), (-300.0, 120.0), (330.0, 160.0)]
+        .iter()
+        .enumerate()
+        .map(|(k, &(u, inland))| {
+            let u = u + (super::mh(k as u32, seed, 0x51e) - 0.5) * 30.0;
+            let d = 26.0 + inland + super::mh(k as u32, seed, 0x51f) * 14.0;
+            [(geo.t[0] + u * geo.n[0] + d * geo.m[0]).floor() + 0.5, (geo.t[2] + u * geo.n[1] + d * geo.m[1]).floor() + 0.5]
+        })
+        .collect();
+    poles.sort_by(|a, b| (a[0] - me[0]).hypot(a[1] - me[2]).total_cmp(&(b[0] - me[0]).hypot(b[1] - me[2])));
+    let h = (0..900).filter_map(|k| geo.level(0.0, 0.0, f64::from(k) * 0.05)).fold(0.0, f64::max);
+    let (kind, color, expect) = if h > 3.0 {
+        ("MAJOR TSUNAMI WARNING", 0xC800FF, if h > 10.0 { "10 m+" } else if h > 5.0 { "10 m" } else { "5 m" })
+    } else if h > 1.0 {
+        ("TSUNAMI WARNING", 0xFF2800, "3 m")
+    } else {
+        ("TSUNAMI ADVISORY", 0xFAF500, "1 m")
+    };
+    super::qk_sea::HandOff { flood: None, k: geo.k, kind, color, expect, major: h > 3.0, poles, siren: cfg.siren, seed, sea: (geo.t, geo.m) }
+}
 impl TsGeo {
     pub fn new(target: &Target, me: [f64; 3], shader_seed: f32) -> TsGeo {
         let [bx, by, bz] = target.block;
@@ -443,6 +510,9 @@ struct Work {
     swept: u64,
     done: bool,
     boats: u32,
+    /// Where the player was as it fired, and the blocks of trees toppled near them so far (`TS_TOPPLE`).
+    me: [f64; 3],
+    toppled: u32,
     /// The land as each chunk was left, for the ponds; the tiles of it still to look at, and the columns of water so far.
     lands: HashMap<(i32, i32), Box<[Land; 256]>>,
     tiles: Option<Vec<(i32, i32)>>,
@@ -648,6 +718,14 @@ fn scoured(kind: u8, n: f64, h: f64) -> &'static str {
     }
 }
 
+/// Trees the wave takes within `TS_TOPPLE_NEAR` of the player topple over as it hits them, falling the way it flows, as
+/// falling blocks (their logs and leaves, each with its whole state; up to `TS_TOPPLE` blocks a strike) that land as
+/// blocks: the edit that clears their column goes in first, and they are summoned `TS_TOPPLE_LAG` after it. Further off
+/// they are taken out at once, under the water.
+pub(super) const TS_TOPPLE: u32 = 900;
+pub(super) const TS_TOPPLE_NEAR: f64 = 110.0;
+const TS_TOPPLE_LAG: f32 = 0.25;
+
 /// One chunk of a read: its columns swept, scoured and strewn, as one edit.
 fn ts_chunk(w: &mut Work, cur: &Cur, k: usize, now: f64, q: &mut Plan) -> bool {
     let (cx, cz, arr) = cur.chunks[k];
@@ -728,6 +806,7 @@ fn ts_chunk(w: &mut Work, cur: &Cur, k: usize, now: f64, q: &mut Plan) -> bool {
     let mut land = [Land::NONE; 256];
     let mut drift: Vec<(usize, &'static str, i32)> = Vec::new();
     let along_x = geo.m[0].abs() > geo.m[1].abs();
+    let mut topple: Vec<String> = Vec::new();
     for i in 0..256 {
         let (lx, lz) = (i % 16, i / 16);
         let (x, z) = (x0 + lx as i32, z0 + lz as i32);
@@ -776,6 +855,29 @@ fn ts_chunk(w: &mut Work, cur: &Cur, k: usize, now: f64, q: &mut Plan) -> bool {
         };
         if c.top > c.g {
             b.put(x, z, c.g + 1 + keep, c.top, "minecraft:air", None, false);
+            // (a tree near the player toppling over the way the water flows: the higher a block, the faster it goes over)
+            if c.tree && w.toppled < TS_TOPPLE && (f64::from(x) + 0.5 - w.me[0]).hypot(f64::from(z) + 0.5 - w.me[2]) < TS_TOPPLE_NEAR {
+                if let Some((surface, blocks)) = a.column(k * 256 + i) {
+                    let base = surface - a.below;
+                    for y in c.g + 1 + keep..=c.top {
+                        let Some(&id) = blocks.get((y - base) as usize) else { continue };
+                        let class = cur.kinds.get(id as usize).map_or(8, |k| k.class);
+                        if !(class == 3 || class == 4) || w.toppled >= TS_TOPPLE {
+                            continue;
+                        }
+                        crate::meter::spend(3_000);
+                        w.toppled += 1;
+                        let h = f64::from(y - c.g);
+                        let (sx, sz) = (0.10 + 0.05 * h, 0.03 * (chance(x, z ^ y, w.seed, 70) - 0.5));
+                        let (vx, vz) = (geo.m[0] * sx - geo.m[1] * sz, geo.m[1] * sx + geo.m[0] * sz);
+                        topple.push(format!(
+                            "summon minecraft:falling_block {x}.5 {y} {z}.5 {{BlockState:{},Time:1,DropItem:0b,Motion:[{vx:.3}d,{:.3}d,{vz:.3}d]}}",
+                            super::gravity::state_nbt(&a.palette[id as usize]),
+                            0.10 + 0.012 * h
+                        ));
+                    }
+                }
+            }
             if c.wreck != u16::MAX && chance(x, z, w.seed, 2) < (0.04 + 0.014 * f64::from(c.stand.min(12))).min(0.18) {
                 wrecks.push((i, c.wreck, c.logs));
             }
@@ -879,6 +981,9 @@ fn ts_chunk(w: &mut Work, cur: &Cur, k: usize, now: f64, q: &mut Plan) -> bool {
     if !b.runs.is_empty() {
         w.changed += 1;
         q.ev.push((t, Act::Blocks(Box::new(b))));
+    }
+    for c in topple {
+        q.ev.push((t + TS_TOPPLE_LAG, Act::Cmd(c)));
     }
     // (every mob and dropped item in the chunk, as the water reaches it)
     q.ev.push((t - 0.4, Act::Cmd(format!("kill @e[type=!minecraft:player,x={x0},y=-70,z={z0},dx=15,dy=520,dz=15]"))));
@@ -1018,6 +1123,14 @@ pub(super) fn tsunami_plan(laser: &'static Laser, target: &Target, terrain: bool
     // (an Earthquake's tsunami: what the quake handed over, strike/qk_sea.rs)
     if let Some(h) = super::qk_sea::take_active() {
         super::qk_sea::qk_tsunami_extras(&mut p, &geo, h, me);
+    } else if ts_config().sirens && ts_config().siren > 0.0 {
+        // (the Tsunami's own, with its sirens on: the coast's poles put up as it fires, the warning from them)
+        let h = own_warning(&geo, me, s, ts_config());
+        // (on the dry land nearest their places, never in the sea)
+        if terrain {
+            super::qk_sea::site_poles(&mut p, &h.poles, 0.0);
+        }
+        super::qk_sea::qk_tsunami_extras(&mut p, &geo, h, me);
     }
     let len = laser.length;
 
@@ -1082,6 +1195,8 @@ pub(super) fn tsunami_plan(laser: &'static Laser, target: &Target, terrain: bool
             swept: 0,
             done: false,
             boats: 0,
+            me,
+            toppled: 0,
             lands: HashMap::new(),
             tiles: None,
             ponded: 0,
@@ -1289,4 +1404,41 @@ mod tests {
         let removes = played.cmds.iter().filter(|(t, c)| c.starts_with("forceload remove") && *t < TS_LEN).count();
         assert_eq!(adds, removes);
     }
+    #[test]
+    fn ts_own_height_and_sirens_as_set() {
+        let target = Target { block: [0, 64, 0], point: [0.5, 65.0, 0.5] };
+        let me = [0.0, 65.0, 200.0];
+        // (the wave at the height set, as the coast's gauge reads it)
+        for h in [5, 20, 60] {
+            let k = ts_k_for(&target, me, 3.0, Some(h));
+            ts_set_scale(k);
+            let g = TsGeo::new(&target, me, 3.0);
+            ts_set_scale(1.0);
+            let top = (0..900).filter_map(|t| g.level(0.0, 0.0, f64::from(t) * 0.05)).fold(0.0, f64::max);
+            assert!((top - f64::from(h)).abs() < 0.5, "{h} m set, {top:.2} at the coast");
+        }
+        assert_eq!(ts_k_for(&target, me, 3.0, None), 1.0);
+        // (its sirens from the poles, heard by where the player is as they play; none with them off)
+        let heard = |on: bool| {
+            ts_configure(TsConfig { height: None, sirens: on, siren: 1.0 });
+            let plan = tsunami_plan(&crate::lasers::TSUNAMI, &target, false, "minecraft:overworld", 3.0, me);
+            plan.iter().filter(|(_, a)| matches!(a, Act::Heard { event, .. } if event.contains("quake.major") || event.contains("quake.siren5"))).count()
+        };
+        assert!(heard(true) >= 6);
+        assert_eq!(heard(false), 0);
+        ts_configure(TsConfig { height: None, sirens: true, siren: 1.0 });
+        // (the steps up and down the heights, MAX past the top)
+        ts_configure(TsConfig { height: Some(10), sirens: true, siren: 1.0 });
+        ts_height_step(1);
+        assert_eq!(ts_config().height, Some(15));
+        ts_height_step(-2);
+        assert_eq!(ts_config().height, Some(5));
+        ts_configure(TsConfig { height: Some(120), sirens: true, siren: 1.0 });
+        ts_height_step(1);
+        assert_eq!(ts_config().height, None);
+        ts_height_step(-1);
+        assert_eq!(ts_config().height, Some(120));
+        ts_configure(TsConfig { height: None, sirens: true, siren: 1.0 });
+    }
+
 }

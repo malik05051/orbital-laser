@@ -36,9 +36,21 @@ pub const SEA: i32 = 62;
 /// How wide along the coast the sea's work reaches (each side), and how far out to sea.
 pub const QT_HALF: f64 = 176.0;
 pub const QT_OUT: f64 = 112.0;
-/// The countdown to arrival when none is set, and the most it may be (seconds).
+/// The countdown to arrival the tests take, and the most one may be set to (seconds).
 pub const QT_COUNTDOWN: f64 = 60.0;
-pub const QT_COUNTDOWN_MAX: f64 = 300.0;
+pub const QT_COUNTDOWN_MAX: f64 = 900.0;
+/// When none is set (`/orbital tsunamitime auto`, the default), the first wave comes between these many seconds after
+/// the warning, a strike's own (`auto_countdown`): three to eight minutes, as the coast nearest a great quake has had.
+pub const QT_AUTO: (f64, f64) = (180.0, 480.0);
+/// The warning comes this long after the earthquake begins (the JMA's first Tsunami Warning for Tohoku was out three
+/// minutes after its origin time).
+pub const QT_WARN: f64 = 180.0;
+/// A strike's own countdown when none is set: between `QT_AUTO`'s two, by its seed.
+pub fn auto_countdown(seed: u32) -> f64 {
+    let h = seed.wrapping_mul(0x9E37_79B1) ^ 0x5bd1_e995;
+    let u = f64::from(h.wrapping_mul(0x85eb_ca6b) >> 8) / f64::from(1u32 << 24);
+    (QT_AUTO.0 + u * (QT_AUTO.1 - QT_AUTO.0)).round()
+}
 
 fn smooth(a: f64, b: f64, x: f64) -> f64 {
     let u = ((x - a) / (b - a)).clamp(0.0, 1.0);
@@ -59,7 +71,7 @@ pub struct SeaTime {
 pub fn sea_time(q: &Quake, countdown: f64) -> Option<SeaTime> {
     let ts = q.tsunami.as_ref()?;
     let t0 = f64::from(QK_T0);
-    let warn = t0 + f64::from(q.t_main()) + 0.6 * f64::from(q.main_dur());
+    let warn = t0 + QT_WARN;
     let shaken = t0 + q.pulses.iter().filter(|p| p.1 >= 0.4).map(|p| f64::from(p.0 + p.2)).fold(0.0, f64::max);
     let arrive = (warn + countdown.clamp(10.0, QT_COUNTDOWN_MAX)).max(shaken + 12.0);
     let draw = arrive - (0.5 * (arrive - warn)).clamp(14.0, 26.0);
@@ -372,13 +384,84 @@ pub fn siren_sites(geo: &QkGeo, me: [f64; 3]) -> Vec<[f64; 2]> {
     out
 }
 
+thread_local! {
+    /// Where each siren pole planned at (x, z) went up, on dry land: (x, z, its ground). What is heard from its
+    /// planned place is heard from there (lib.rs's `Act::Heard`, through `sited`), the Tsunami's after the quake too.
+    static SITED: RefCell<Vec<([f64; 2], [f64; 3])>> = const { RefCell::new(Vec::new()) };
+}
+/// How far round its planned place a pole looks for dry land (blocks), the step it looks in, and how long (strike
+/// seconds) the poles wait for the world's answer before they go up where planned.
+const SITE_R: i32 = 128;
+const SITE_STEP: i32 = 8;
+const SITE_WAIT: f32 = 3.0;
+/// The places round a pole's planned one it may go, nearest first.
+fn site_offsets() -> Vec<(i32, i32)> {
+    let n = SITE_R / SITE_STEP;
+    let mut v: Vec<(i32, i32)> = (-n..=n).flat_map(|i| (-n..=n).map(move |j| (i * SITE_STEP, j * SITE_STEP))).filter(|&(a, b)| a * a + b * b <= SITE_R * SITE_R).collect();
+    v.sort_by_key(|&(a, b)| (a * a + b * b, a, b));
+    v
+}
+/// Where a sound planned at `p` (a pole's horns, `[x, y + 9, z]`) is heard from: its pole's place on the land.
+pub fn sited(p: [f64; 3]) -> [f64; 3] {
+    SITED.with(|s| s.borrow().iter().find(|(k, _)| (k[0] - p[0]).abs() < 0.01 && (k[1] - p[2]).abs() < 0.01).map_or(p, |&(_, [x, z, g])| [x, g + 9.0, z]))
+}
+/// The dry land nearest (x0, z0) among `offs` round it, as the survey has it: firm ground (dry the steps round it too)
+/// if there is some, else any dry column; (x, z, its ground).
+fn dry_spot(x0: i32, z0: i32, offs: &[(i32, i32)]) -> Option<(i32, i32, i32)> {
+    let dry = |x: i32, z: i32| {
+        crate::meter::spend(150);
+        crate::ground::at(x, z).filter(|_| crate::ground::water(x, z).is_none())
+    };
+    let round = [(SITE_STEP, 0), (-SITE_STEP, 0), (0, SITE_STEP), (0, -SITE_STEP)];
+    let firm = offs.iter().find(|&&(a, b)| dry(x0 + a, z0 + b).is_some() && round.iter().all(|&(c, d)| dry(x0 + a + c, z0 + b + d).is_some()));
+    let &(a, b) = firm.or_else(|| offs.iter().find(|&&(a, b)| dry(x0 + a, z0 + b).is_some()))?;
+    Some((x0 + a, z0 + b, dry(x0 + a, z0 + b)?))
+}
+/// The coast's siren poles planned at `poles` put up from strike second `at`, each on the dry land nearest its place
+/// (none in the sea): the world asked where the land is round them, the poles going up once it answers (where planned
+/// if no land is near or the answer is slow); their sounds heard from there. With the terrain on only: off, no poles go
+/// up and their sounds come from their planned places.
+pub fn site_poles(p: &mut Plan, poles: &[[f64; 2]], at: f32) {
+    SITED.with(|s| s.borrow_mut().clear());
+    let tag = crate::ground::new_tag();
+    let offs = site_offsets();
+    let columns: Vec<(i32, i32)> = poles.iter().flat_map(|&[x, z]| offs.iter().map(move |&(a, b)| (x.floor() as i32 + a, z.floor() as i32 + b))).collect();
+    crate::meter::spend(30 * columns.len() as u64);
+    p.ev.push((at, Act::Survey { tag, columns }));
+    let poles = poles.to_vec();
+    p.later(at + 0.1, move |q| pole_stage(q, poles, tag, at + 0.1, at + SITE_WAIT));
+}
+fn pole_stage(q: &mut Plan, poles: Vec<[f64; 2]>, tag: u32, at: f32, until: f32) {
+    if !crate::ground::ready(tag) && at < until {
+        q.later(at + 0.2, move |q| pole_stage(q, poles, tag, at + 0.2, until));
+        return;
+    }
+    let offs = site_offsets();
+    for (k, &[px, pz]) in poles.iter().enumerate() {
+        let (x0, z0) = (px.floor() as i32, pz.floor() as i32);
+        let t = at + 0.05 * k as f32;
+        match dry_spot(x0, z0, &offs) {
+            Some((x, z, g)) => {
+                SITED.with(|s| s.borrow_mut().push(([px, pz], [f64::from(x) + 0.5, f64::from(z) + 0.5, f64::from(g)])));
+                q.ev.push((t, Act::Blocks(Box::new(siren_pole_at(x, z, Some(g))))));
+            }
+            None => q.ev.push((t, Act::Blocks(Box::new(siren_pole(x0, z0))))),
+        }
+    }
+}
+
 /// A J-Alert siren pole at (x, z), as real blocks on its ground: a grey metal post (iron bars, which the quake's damage
 /// leaves standing) eleven high, loudspeaker horns facing out
 /// four ways near its top and two more under them, a lightning rod on its crown.
 pub fn siren_pole(x: i32, z: i32) -> Blocks {
+    siren_pole_at(x, z, None)
+}
+/// As `siren_pole`, standing on `ground` (the first air over the land) if given, else on each column's own top.
+pub fn siren_pole_at(x: i32, z: i32, ground: Option<i32>) -> Blocks {
     let mut b = Blocks { clear_of_player: true, ..Default::default() };
-    b.put(x, z, 0, 10, "minecraft:iron_bars", None, true);
-    b.put(x, z, 11, 11, "minecraft:waxed_lightning_rod[facing=up]", None, true);
+    let (g, surface) = ground.map_or((0, true), |g| (g, false));
+    b.put(x, z, g, g + 10, "minecraft:iron_bars", None, surface);
+    b.put(x, z, g + 11, g + 11, "minecraft:waxed_lightning_rod[facing=up]", None, surface);
     let horns: [(i32, i32, &'static str); 4] = [
         (0, -1, "minecraft:waxed_lightning_rod[facing=north]"),
         (1, 0, "minecraft:waxed_lightning_rod[facing=east]"),
@@ -386,9 +469,9 @@ pub fn siren_pole(x: i32, z: i32) -> Blocks {
         (-1, 0, "minecraft:waxed_lightning_rod[facing=west]"),
     ];
     for (k, (dx, dz, horn)) in horns.iter().enumerate() {
-        b.put(x + dx, z + dz, 9, 9, horn, None, true);
+        b.put(x + dx, z + dz, g + 9, g + 9, horn, None, surface);
         if k % 2 == 1 {
-            b.put(x + dx, z + dz, 7, 7, horn, None, true);
+            b.put(x + dx, z + dz, g + 7, g + 7, horn, None, surface);
         }
     }
     b
@@ -468,6 +551,11 @@ pub const QT_POLE_VOL: f32 = 0.55;
 /// A broadcast's whole cycle (seconds): the siren twice, then its announcement spoken, then again (Oiso's poles on 30
 /// July 2025, the Kamchatka M8.8's Tsunami Warning: blasts 11 s apart, some 12 s of voice, the next at 31 s).
 pub const QT_CYCLE: f64 = 31.0;
+/// How far from a pole its sounds carry (the game's fade over the sounds' `attenuation_distance`, 400, ends there too),
+/// and past how far they are its far take (muffled, echoing): both from where the player is as each plays (`Act::Heard`),
+/// so walking away from the coast the sirens fade and stop, and coming back to it they come back.
+pub const QT_HEAR: f64 = 400.0;
+pub const QT_NEAR: f64 = 140.0;
 
 /// The coast's disaster-prevention radio, from its poles, as a town's sounds in life: no chime, the siren twice in the
 /// JMA's pattern (a Major Tsunami Warning's 3 s on and 2 s off: `quake.major`, two blasts, twice; a Tsunami Warning's
@@ -484,13 +572,13 @@ pub fn sirens(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], from: f64,
     let (blast, every) = if major { ("major", 10.0) } else { ("siren5", 11.0) };
     for (k, &[x, z]) in poles.iter().enumerate() {
         let d = (x - me[0]).hypot(z - me[2]);
-        let far = if d > 140.0 { "_far" } else { "" };
         let late = super::mh(k as u32, seed, 0x5a1) * 8.0 + d / 343.0;
-        let at = Some([x, y + 9.0, z]);
+        let at = vec![[x, y + 9.0, z]];
         let v = QT_POLE_VOL * vol;
         let push = |p: &mut Plan, t: f64, ev: &str| {
             if t >= from && t < until + 6.0 {
-                p.ev.push((t as f32, Act::Sound { event: format!("orbital:quake.{ev}{far}"), at, volume: v, pitch: 1.0 }));
+                let event = format!("orbital:quake.{ev}");
+                p.ev.push((t as f32, Act::Heard { far: format!("{event}_far"), event, at: at.clone(), volume: v, near: QT_NEAR, reach: QT_HEAR, here: false }));
             }
         };
         let mut c = from + late;
@@ -500,10 +588,13 @@ pub fn sirens(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], from: f64,
             c += QT_CYCLE;
         }
     }
-    // (and further off still, past the poles: the player's own recording of a coast's sirens, if they put one in, faint)
+    // (and further off still, past the poles: the player's own recording of a coast's sirens, if they put one in, faint,
+    // and only within the poles' reach, fainter the further off the nearest is)
+    let all: Vec<[f64; 3]> = poles.iter().map(|&[x, z]| [x, y + 9.0, z]).collect();
     let mut t = from + 6.0;
     while t < until {
-        p.ev.push((t as f32, Act::Sound { event: "orbital:quake.siren".into(), at: None, volume: (0.12 * vol).min(1.0), pitch: 1.0 }));
+        let event = "orbital:quake.siren".to_string();
+        p.ev.push((t as f32, Act::Heard { far: event.clone(), event, at: all.clone(), volume: (0.12 * vol).min(1.0), near: QT_HEAR, reach: QT_HEAR, here: true }));
         t += 16.0;
     }
 }
@@ -515,9 +606,9 @@ pub fn eew_alert(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], t: f64,
     }
     for (k, &[x, z]) in poles.iter().enumerate() {
         let d = (x - me[0]).hypot(z - me[2]);
-        let far = if d > 140.0 { "_far" } else { "" };
         let late = super::mh(k as u32, seed, 0x5a2) * 1.5 + d / 343.0;
-        p.ev.push(((t + late) as f32, Act::Sound { event: format!("orbital:quake.eew{far}"), at: Some([x, y + 9.0, z]), volume: 0.8 * QT_POLE_VOL * vol, pitch: 1.0 }));
+        let event = "orbital:quake.eew".to_string();
+        p.ev.push(((t + late) as f32, Act::Heard { far: format!("{event}_far"), event, at: vec![[x, y + 9.0, z]], volume: 0.8 * QT_POLE_VOL * vol, near: QT_NEAR, reach: QT_HEAR, here: false }));
     }
 }
 
@@ -580,6 +671,33 @@ pub fn observed_max(ts: &Tsu, st: &SeaTime, t: f64) -> f64 {
 mod tests {
     use super::*;
     use crate::strike::quake::QK_PRESETS;
+
+    #[test]
+    fn a_siren_pole_planned_in_the_sea_goes_up_on_the_nearest_land() {
+        // (the sea west of x = 37, the land east of it; a pole planned at the origin, out in the sea)
+        crate::ground::set_test(Some(|x, _| Some(if x < 37 { 50 } else { 66 })));
+        let offs = site_offsets();
+        let cols: Vec<(i32, i32)> = offs.clone();
+        let tag = crate::ground::new_tag();
+        crate::ground::test_answer(tag, &cols);
+        let sea: Vec<((i32, i32), i32)> = cols.iter().filter(|c| c.0 < 37).map(|&c| (c, 12)).collect();
+        crate::ground::set_test_water(&sea);
+        let (x, z, g) = dry_spot(0, 0, &offs).expect("land near");
+        // (the nearest firm land: the step after the coast, its own steps round it dry too)
+        assert!((37 + SITE_STEP..=37 + 2 * SITE_STEP).contains(&x) && z == 0 && g == 66, "{x} {z} {g}");
+        // its sounds from there, at its horns
+        SITED.with(|s| s.borrow_mut().push(([0.5, 0.5], [f64::from(x) + 0.5, f64::from(z) + 0.5, f64::from(g)])));
+        assert_eq!(sited([0.5, 59.0, 0.5]), [f64::from(x) + 0.5, 75.0, 0.5]);
+        assert_eq!(sited([300.5, 59.0, 0.5]), [300.5, 59.0, 0.5], "another place as planned");
+        // (and the pole stands on that ground, not on each column's top)
+        let b = siren_pole_at(x, z, Some(g));
+        assert!(b.runs.iter().all(|r| r.surface.is_none()) && b.runs.iter().any(|r| r.y == g && r.height == 11));
+        // all sea: none, it goes up where planned
+        crate::ground::set_test_water(&cols.iter().map(|&c| (c, 12)).collect::<Vec<_>>());
+        assert_eq!(dry_spot(0, 0, &offs), None);
+        crate::ground::set_test(None);
+        SITED.with(|s| s.borrow_mut().clear());
+    }
 
     #[test]
     fn qk_sea_draws_back_then_comes_in_waves_and_settles() {

@@ -11,7 +11,7 @@
 //! field to type one in. Drawn by the game from the
 //! shapes built here; GUI pixels, from the centre of the screen.
 use crate::lasers::{LASERS, Laser, is_ship};
-use crate::strike::{APPROACHES, ARRIVALS, COLOUR_RGB, COLOURS, Choice, FD_PATTERNS, QK_CUSTOM, qk_custom_inputs, qk_quake, shindo_class};
+use crate::strike::{APPROACHES, ARRIVALS, COLOUR_RGB, COLOURS, Choice, FD_PATTERNS, QK_CUSTOM, QK_TSU_MW, qk_custom_inputs, qk_quake, shindo_class};
 use horizon_mod_sdk::ui::{Draw, Point, Rect};
 use std::f32::consts::{PI, TAU};
 
@@ -62,6 +62,9 @@ const LOCK: Rect = Rect { x: LEFT_X, y: QUALITY.y, w: HUD.w, h: HUD.h };
 /// the follow camera's under it (the camera chasing the Nuke's or the Payload's bomb down, `/orbital follow`).
 const KNOCK: Rect = Rect { x: LEFT_X, y: STOP.y, w: HUD.w, h: HUD.h };
 const FOLLOW: Rect = Rect { x: LEFT_X, y: STOP.y + STOP.h + 2.0, w: HUD.w, h: HUD.h };
+/// Gravity after a strike (`/orbital gravity`: what it leaves hanging comes down), in the right column under the stop
+/// button's row, for every laser that settles the land (`strike::gv_reach`).
+const GRAV: Rect = Rect { x: HUD.x, y: FOLLOW.y, w: HUD.w, h: HUD.h };
 /// Characters the seed's field holds (seeds run 1 to 997).
 const SEED_CHARS: usize = 3;
 /// The impact frames' row's buttons, as the blast sound's.
@@ -89,18 +92,37 @@ fn quake_button(k: usize) -> Rect {
     let x = -w / 2.0 + QUAKE_LABEL_W + (0..k).map(quake_w).sum::<f32>() + BTN_GAP * k as f32;
     Rect { x, y: ROW_Y, w: quake_w(k), h: BTN_H }
 }
-/// The custom earthquake's row under the presets': MAG « ‹ 7.0 › »  DEPTH ‹ 10 km ›  SHINDO ‹ AUTO ›. Its pieces left
-/// to right: (rect, what it is: a label, a value, or a step (field, dir)).
+/// The custom earthquake's rows under the presets': MAG « ‹ 7.0 › »  DEPTH ‹ 10 km ›  SHINDO ‹ AUTO ›, then SHAKING
+/// ‹ AUTO ›  TSUNAMI NO  ARRIVAL ‹ AUTO ›  SIRENS ON (the last two every Earthquake's). Their pieces left to right:
+/// (rect, what it is: a label, a value, a step (field, dir), or a switch (field)).
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum QkPiece {
     Label(&'static str),
     Value(u8),
     Step(u8, i8),
+    Switch(u8),
+}
+/// The fields past the custom quake's own numbers (0 magnitude, 1 depth, 2 Shindo, 3 seconds of shaking): its
+/// tsunami (`strike::qk_custom_step`), then every Earthquake's tsunami countdown and sirens (lib.rs's own settings).
+pub const QK_TSUNAMI: u8 = 4;
+pub const QK_ARRIVAL: u8 = 5;
+pub const QK_SIRENS: u8 = 6;
+thread_local! {
+    /// What lib.rs has the Earthquake's tsunami countdown (seconds, 0 auto) and sirens at, for the wheel to show.
+    static QK_EXTRAS: std::cell::Cell<(u32, bool)> = const { std::cell::Cell::new((0, true)) };
+}
+pub fn set_qk_extras(arrival: u32, sirens: bool) {
+    QK_EXTRAS.with(|c| c.set((arrival, sirens)));
 }
 const QK_STEP_W: f32 = 11.0;
 fn qk_custom_row() -> Vec<(Rect, QkPiece)> {
+    let mut v = qk_row(0);
+    v.extend(qk_row(1));
+    v
+}
+fn qk_row(r: usize) -> Vec<(Rect, QkPiece)> {
     use QkPiece::*;
-    let items = [
+    let first = [
         (Label("MAGNITUDE"), 58.0),
         (Step(0, -2), QK_STEP_W),
         (Step(0, -1), QK_STEP_W),
@@ -118,8 +140,26 @@ fn qk_custom_row() -> Vec<(Rect, QkPiece)> {
         (Value(2), 30.0),
         (Step(2, 1), QK_STEP_W),
     ];
+    let second = [
+        (Label("SHAKING"), 46.0),
+        (Step(3, -1), QK_STEP_W),
+        (Value(3), 30.0),
+        (Step(3, 1), QK_STEP_W),
+        (Label(""), 8.0),
+        (Label("TSUNAMI"), 44.0),
+        (Switch(QK_TSUNAMI), 28.0),
+        (Label(""), 8.0),
+        (Label("ARRIVAL"), 44.0),
+        (Step(QK_ARRIVAL, -1), QK_STEP_W),
+        (Value(QK_ARRIVAL), 30.0),
+        (Step(QK_ARRIVAL, 1), QK_STEP_W),
+        (Label(""), 8.0),
+        (Label("SIRENS"), 38.0),
+        (Switch(QK_SIRENS), 28.0),
+    ];
+    let items: &[(QkPiece, f32)] = if r == 0 { &first } else { &second };
     let w: f32 = items.iter().map(|i| i.1).sum::<f32>() + BTN_GAP * (items.len() - 1) as f32;
-    let y = ROW_Y + BTN_H + BTN_GAP + 2.0;
+    let y = ROW_Y + (BTN_H + BTN_GAP + 2.0) + r as f32 * (BTN_H + BTN_GAP);
     let mut x = -w / 2.0;
     items
         .iter()
@@ -130,14 +170,60 @@ fn qk_custom_row() -> Vec<(Rect, QkPiece)> {
         })
         .collect()
 }
-/// The custom earthquake's values as the row shows them.
+/// The Tsunami's row: WAVE HEIGHT « ‹ 40 m › »  SIRENS ON (the Tsunami fired on its own: `strike::ts_config`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum TsPiece {
+    Label(&'static str),
+    Value,
+    Step(i8),
+    Sirens,
+}
+fn ts_row() -> Vec<(Rect, TsPiece)> {
+    use TsPiece::*;
+    let items = [
+        (Label("WAVE HEIGHT"), 66.0),
+        (Step(-2), QK_STEP_W),
+        (Step(-1), QK_STEP_W),
+        (Value, 34.0),
+        (Step(1), QK_STEP_W),
+        (Step(2), QK_STEP_W),
+        (Label(""), 8.0),
+        (Label("SIRENS"), 38.0),
+        (Sirens, 30.0),
+    ];
+    let w: f32 = items.iter().map(|i| i.1).sum::<f32>() + BTN_GAP * (items.len() - 1) as f32;
+    let mut x = -w / 2.0;
+    items
+        .iter()
+        .map(|&(p, iw)| {
+            let r = Rect { x, y: ROW_Y, w: iw, h: BTN_H };
+            x += iw + BTN_GAP;
+            (r, p)
+        })
+        .collect()
+}
+/// The custom earthquake's values as the rows show them.
 fn qk_custom_text(field: u8) -> String {
-    let (mw, depth, sh) = qk_custom_inputs();
+    let c = qk_custom_inputs();
     match field {
-        0 => format!("{mw:.1}"),
-        1 => format!("{depth:.0} km"),
-        _ => sh.map_or("AUTO".to_string(), |s| shindo_class(s).0.to_string()),
+        0 => format!("{:.1}", c.mw),
+        1 => format!("{:.0} km", c.depth),
+        2 => c.shindo.map_or("AUTO".to_string(), |s| shindo_class(s).0.to_string()),
+        3 => crate::shaking_text(c.shaking),
+        _ => match QK_EXTRAS.with(std::cell::Cell::get).0 {
+            0 => "AUTO".to_string(),
+            s if s % 60 == 0 => format!("{}m", s / 60),
+            s => format!("{}m{:02}", s / 60, s % 60),
+        },
     }
+}
+/// A switch of the custom earthquake's rows: on or off, and whether it can be switched now (a tsunami only from Mw 6.5).
+fn qk_switch(field: u8) -> (bool, bool) {
+    if field == QK_SIRENS {
+        return (QK_EXTRAS.with(std::cell::Cell::get).1, true);
+    }
+    let c = qk_custom_inputs();
+    (c.has_tsunami(), c.mw >= QK_TSU_MW)
 }
 
 fn impact_button(k: usize) -> Rect {
@@ -171,9 +257,14 @@ pub enum Spot {
     Quake(usize),
     /// The custom earthquake's row: a step of its magnitude (0), depth (1) or Shindo (2), down or up (±2 a bigger step).
     QkStep(u8, i8),
+    /// The Tsunami's row: its wave's height a step down or up (±2 three steps), its sirens on or off.
+    TsStep(i8),
+    TsSirens,
     /// The knockback's switch, and the follow camera's.
     Knock,
     Follow,
+    /// Gravity after a strike's switch.
+    Gravity,
     /// The seed's field, and its lock's switch.
     SeedField,
     SeedLock,
@@ -203,6 +294,7 @@ pub enum Rows {
     Impact,
     Crease,
     Quake,
+    Tsunami,
 }
 impl Rows {
     /// The rows laser `i` has (if any).
@@ -214,6 +306,7 @@ impl Rows {
             Some(l) if l.key == "rod" => Rows::Impact,
             Some(l) if l.key == "fold" => Rows::Crease,
             Some(l) if l.key == "earthquake" => Rows::Quake,
+            Some(l) if l.key == "tsunami" => Rows::Tsunami,
             _ => Rows::None,
         }
     }
@@ -373,6 +466,10 @@ pub fn toggles(i: usize) -> Vec<(Rect, Spot)> {
     if key == "nuke" || key == "payload" {
         out.push((at.next().unwrap_or(FOLLOW), Spot::Follow));
     }
+    // (and on the right, gravity after the strike)
+    if crate::strike::gv_reach(key).is_some() {
+        out.push((GRAV, Spot::Gravity));
+    }
     out
 }
 /// Laser `i`'s left-column switch under the cursor, if any.
@@ -404,6 +501,17 @@ pub fn spot(x: f32, y: f32, rows: impl Into<Rows>, page: usize) -> Option<Spot> 
             }
         }
     }
+    if rows == Rows::Tsunami {
+        for (r, p) in ts_row() {
+            if inside(&r, x, y) {
+                match p {
+                    TsPiece::Step(d) => return Some(Spot::TsStep(d)),
+                    TsPiece::Sirens => return Some(Spot::TsSirens),
+                    _ => {}
+                }
+            }
+        }
+    }
     if rows == Rows::Quake {
         for k in 0..=QK_CUSTOM {
             if inside(&quake_button(k), x, y) {
@@ -411,10 +519,12 @@ pub fn spot(x: f32, y: f32, rows: impl Into<Rows>, page: usize) -> Option<Spot> 
             }
         }
         for (r, p) in qk_custom_row() {
-            if let QkPiece::Step(f, d) = p
-                && inside(&r, x, y)
-            {
-                return Some(Spot::QkStep(f, d));
+            if inside(&r, x, y) {
+                match p {
+                    QkPiece::Step(f, d) => return Some(Spot::QkStep(f, d)),
+                    QkPiece::Switch(f) => return Some(Spot::QkStep(f, 1)),
+                    _ => {}
+                }
             }
         }
     }
@@ -555,7 +665,7 @@ impl Wheel {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn draws(&self, selected: usize, terrain: bool, hud: bool, approach: usize, arrival: usize, colours: &[usize], blast_alt: &[bool], fast: bool, impact: usize, pattern: usize, quake: usize, knock: bool, follow: bool, locked: bool, seed: Option<u32>) -> Vec<Draw> {
+    pub fn draws(&self, selected: usize, terrain: bool, hud: bool, approach: usize, arrival: usize, colours: &[usize], blast_alt: &[bool], fast: bool, impact: usize, pattern: usize, quake: usize, knock: bool, follow: bool, gravity: bool, locked: bool, seed: Option<u32>) -> Vec<Draw> {
         let mut out = Vec::new();
         // the world dims behind the wheel
         out.push(Draw::Fill((Rect { x: -4000.0, y: -4000.0, w: 8000.0, h: 8000.0 }, 0x8C05070A)));
@@ -611,7 +721,11 @@ impl Wheel {
         text(&mut out, if fast { "FAST" } else { "FULL" }, QUALITY.x + 70.0, QUALITY.y + 2.0, if fast { 0x7CE884 } else { 0xF0C060 });
         // and on the left, under the seed's rows, the knockback and the follow camera, for the lasers they apply to
         for (b, spot) in toggles(self.row_for.unwrap_or(selected)) {
-            let (label, on) = if spot == Spot::Knock { ("KNOCKBACK", knock) } else { ("FOLLOW", follow) };
+            let (label, on) = match spot {
+                Spot::Knock => ("KNOCKBACK", knock),
+                Spot::Follow => ("FOLLOW", follow),
+                _ => ("GRAVITY", gravity),
+            };
             let hovered = self.hover == Some(spot);
             out.push(Draw::Fill((b, if hovered { 0xF0262A31 } else { 0xD0101318 })));
             out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - 1.5, w: b.w, h: 1.5 }, if on { 0xFF62D46A } else { 0xFFE0524E })));
@@ -707,6 +821,38 @@ impl Wheel {
                 text(&mut out, p.1, b.x + b.w / 2.0, b.y + 2.0, if chosen || hovered { ms.rgb } else { 0x9AA2AE });
             }
         }
+        // (the Tsunami's: its wave's height and its sirens, for the next one fired on its own)
+        if let Some(rl) = row.filter(|&i| LASERS[i].key == "tsunami") {
+            let ms = LASERS[rl];
+            let c = crate::strike::ts_config();
+            for (b, p) in ts_row() {
+                match p {
+                    TsPiece::Label(l) => text(&mut out, l, b.x + b.w / 2.0, b.y + 2.0, 0xB8BEC8),
+                    TsPiece::Value => {
+                        out.push(Draw::Fill((b, 0xE0101318)));
+                        out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - 1.0, w: b.w, h: 1.0 }, argb(0x90, shade(ms.rgb, 0.6)))));
+                        text(&mut out, &crate::strike::ts_height_text(c.height), b.x + b.w / 2.0, b.y + 2.0, ms.rgb);
+                    }
+                    TsPiece::Step(d) => {
+                        let hovered = self.hover == Some(Spot::TsStep(d));
+                        out.push(Draw::Fill((b, if hovered { argb(0xE6, shade(ms.rgb, 0.42)) } else { 0xE0181C22 })));
+                        let glyph = match d {
+                            -2 => "<<",
+                            -1 => "-",
+                            1 => "+",
+                            _ => ">>",
+                        };
+                        text(&mut out, glyph, b.x + b.w / 2.0, b.y + 2.0, if hovered { ms.rgb } else { 0xB8BEC8 });
+                    }
+                    TsPiece::Sirens => {
+                        let hovered = self.hover == Some(Spot::TsSirens);
+                        out.push(Draw::Fill((b, if hovered { 0xF0262A31 } else { 0xD0101318 })));
+                        out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - 1.5, w: b.w, h: 1.5 }, if c.sirens { 0xFF62D46A } else { 0xFFE0524E })));
+                        text(&mut out, if c.sirens { "ON" } else { "OFF" }, b.x + b.w / 2.0, b.y + 2.0, if c.sirens { 0x7CE884 } else { 0xF06A64 });
+                    }
+                }
+            }
+        }
         // (the Earthquake's: which historic earthquake, the next strike's)
         if let Some(rl) = row.filter(|&i| LASERS[i].key == "earthquake") {
             let ms = LASERS[rl];
@@ -723,15 +869,42 @@ impl Wheel {
                 out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - rim, w: b.w, h: rim }, rim_c)));
                 text(&mut out, p.button, b.x + b.w / 2.0, b.y + 2.0, if chosen || hovered { ms.rgb } else { 0x9AA2AE });
             }
-            // the custom one's numbers, under them (a step picks CUSTOM too)
+            // the custom one's numbers, under them (a step picks CUSTOM too); then the tsunami's countdown and the
+            // sirens, every Earthquake's (bright while the one picked has a tsunami, for the countdown)
             let custom = quake == QK_CUSTOM;
+            let has_tsunami = qk_quake(quake).tsunami.is_some();
             for (b, p) in qk_custom_row() {
+                let lit = |f: u8| match f {
+                    QK_ARRIVAL => has_tsunami,
+                    QK_SIRENS => true,
+                    _ => custom,
+                };
                 match p {
-                    QkPiece::Label(l) => text(&mut out, l, b.x + b.w / 2.0, b.y + 2.0, if custom { 0xB8BEC8 } else { 0x7A808A }),
+                    QkPiece::Label(l) => {
+                        let f = match l {
+                            "ARRIVAL" => QK_ARRIVAL,
+                            "SIRENS" => QK_SIRENS,
+                            _ => 0,
+                        };
+                        text(&mut out, l, b.x + b.w / 2.0, b.y + 2.0, if lit(f) { 0xB8BEC8 } else { 0x7A808A });
+                    }
                     QkPiece::Value(f) => {
                         out.push(Draw::Fill((b, 0xE0101318)));
                         out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - 1.0, w: b.w, h: 1.0 }, argb(0x90, shade(ms.rgb, 0.6)))));
-                        text(&mut out, &qk_custom_text(f), b.x + b.w / 2.0, b.y + 2.0, if custom { ms.rgb } else { 0x9AA2AE });
+                        text(&mut out, &qk_custom_text(f), b.x + b.w / 2.0, b.y + 2.0, if lit(f) { ms.rgb } else { 0x9AA2AE });
+                    }
+                    QkPiece::Switch(f) => {
+                        let (on, can) = qk_switch(f);
+                        let hovered = self.hover == Some(Spot::QkStep(f, 1));
+                        out.push(Draw::Fill((b, if hovered && can { 0xF0262A31 } else { 0xD0101318 })));
+                        let (word, rim, tc) = match (on, can && lit(f)) {
+                            (true, true) => (if f == QK_SIRENS { "ON" } else { "YES" }, 0xFF62D46A, 0x7CE884),
+                            (false, true) => (if f == QK_SIRENS { "OFF" } else { "NO" }, 0xFFE0524E, 0xF06A64),
+                            (true, false) => ("YES", 0xFF5A6070, 0x9AA2AE),
+                            (false, false) => (if f == QK_SIRENS { "OFF" } else { "NO" }, 0xFF5A6070, 0x7A808A),
+                        };
+                        out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - 1.5, w: b.w, h: 1.5 }, rim)));
+                        text(&mut out, word, b.x + b.w / 2.0, b.y + 2.0, tc);
                     }
                     QkPiece::Step(f, d) => {
                         let hovered = self.hover == Some(Spot::QkStep(f, d));
@@ -797,14 +970,22 @@ impl Wheel {
             }
             Some(Spot::QkStep(f, d)) => (
                 match f {
-                    0 => format!("Magnitude {} (5.0 to 9.6)", if d.abs() >= 2 { "by 0.25" } else { "by 0.1" }),
-                    1 => "Depth: shallow ones break the surface, deep ones shake less".to_string(),
-                    _ => "Highest Shindo: AUTO works it out from magnitude and depth".to_string(),
+                    0 => format!("Magnitude {} (5.0 to 50)", if d.abs() >= 2 { "by 0.25, by 1 from 10" } else { "by 0.1" }),
+                    1 => "Depth 1 to 1000 km: shallow ones break the surface".to_string(),
+                    2 => "Shaking strength, the top Shindo: AUTO works it out".to_string(),
+                    3 => "How long it shakes: AUTO, or 10 s to 10 min".to_string(),
+                    QK_TSUNAMI if qk_custom_inputs().mw < QK_TSU_MW => "A tsunami needs magnitude 6.5 or more".to_string(),
+                    QK_TSUNAMI => "A tsunami after it: YES the sea comes, NO none".to_string(),
+                    QK_ARRIVAL => "First wave after the warning: AUTO 3-8 min, or 1-15".to_string(),
+                    _ => "J-Alert siren poles on land: on or off".to_string(),
                 },
                 0x8C93A0,
             ),
+            Some(Spot::TsStep(d)) => (format!("Wave height at the coast {} (2 m to 120 m, or MAX)", if d.abs() >= 2 { "by 3 steps" } else { "a step" }), 0x8C93A0),
+            Some(Spot::TsSirens) => ("J-Alert siren poles warn of the wave (heard near them)".to_string(), 0x8C93A0),
             Some(Spot::Knock) => ("Push on you: thrown by blasts, waves and Shindo 6+ shaking".to_string(), 0x8C93A0),
             Some(Spot::Follow) => ("Camera chases the Nuke's or Payload's bomb down".to_string(), 0x8C93A0),
+            Some(Spot::Gravity) => ("After the strike, blocks left hanging fall (terrain on)".to_string(), 0x8C93A0),
             Some(Spot::SeedField) => (
                 if locked { "Click to type a seed, 1 to 997: every strike looks the same" } else { "The last strike's seed. Click to type another, then lock it" }.to_string(),
                 0x8C93A0,
@@ -991,12 +1172,19 @@ mod tests {
     #[test]
     fn the_left_switches_show_for_their_lasers() {
         let at = |i: usize| toggles(i).into_iter().map(|(b, s)| (b.y, s)).collect::<Vec<_>>();
-        assert_eq!(at(ship("nuke")), vec![(KNOCK.y, Spot::Knock), (FOLLOW.y, Spot::Follow)]);
-        assert_eq!(at(ship("rod")), vec![(KNOCK.y, Spot::Knock)]);
-        assert_eq!(at(ship("hurricane")), vec![(KNOCK.y, Spot::Knock)]);
-        assert_eq!(at(ship("fold")), vec![(KNOCK.y, Spot::Knock)]);
-        assert_eq!(at(ship("payload")), vec![(KNOCK.y, Spot::Follow)]);
-        assert!(at(ship("plasma")).is_empty());
+        let g = (GRAV.y, Spot::Gravity);
+        assert_eq!(at(ship("nuke")), vec![(KNOCK.y, Spot::Knock), (FOLLOW.y, Spot::Follow), g]);
+        assert_eq!(at(ship("rod")), vec![(KNOCK.y, Spot::Knock), g]);
+        assert_eq!(at(ship("hurricane")), vec![(KNOCK.y, Spot::Knock), g]);
+        assert_eq!(at(ship("fold")), vec![(KNOCK.y, Spot::Knock), g]);
+        assert_eq!(at(ship("payload")), vec![(KNOCK.y, Spot::Follow), g]);
+        assert_eq!(at(ship("plasma")), vec![g]);
+        // (none for the Supervolcano, whose vent is far from its target)
+        assert_eq!(at(ship("supervolcano")), vec![(KNOCK.y, Spot::Knock)]);
+        // (the gravity switch in the right column, clear of the ring, the arrow and the stop button)
+        let corner = (GRAV.x * GRAV.x + (GRAV.y + GRAV.h) * (GRAV.y + GRAV.h)).sqrt();
+        assert!(corner > R_OUT + 10.0 && GRAV.y + GRAV.h < arrow(1).y && GRAV.y >= STOP.y + STOP.h);
+        assert_eq!(toggle_spot(GRAV.x + 5.0, GRAV.y + 5.0, ship("nuke")), Some(Spot::Gravity));
         assert_eq!(toggle_spot(KNOCK.x + 5.0, KNOCK.y + 5.0, ship("payload")), Some(Spot::Follow));
         assert_eq!(toggle_spot(FOLLOW.x + 5.0, FOLLOW.y + 5.0, ship("plasma")), None);
     }
@@ -1147,7 +1335,7 @@ mod tests {
             assert_eq!(w.hover, Some(Spot::Sound(1)));
             assert_eq!(w.rows(other), Rows::Sound);
             // (its own hint under the ring)
-            let hint = w.draws(other, true, true, 0, 0, &[0; 16], &[false; 2], true, 1, 0, 0, true, false, false, None).into_iter().any(|d| matches!(d, Draw::Text((t, ..)) if t == SOUND_HINTS[si][1]));
+            let hint = w.draws(other, true, true, 0, 0, &[0; 16], &[false; 2], true, 1, 0, 0, true, false, true, false, None).into_iter().any(|d| matches!(d, Draw::Text((t, ..)) if t == SOUND_HINTS[si][1]));
             assert!(hint, "{key}");
             // (and where a ship's buttons would be, nothing of theirs)
             let b = button(1, 0);
@@ -1157,7 +1345,7 @@ mod tests {
             assert_eq!(Wheel::on_page(0, 1.0).rows(pl), Rows::Sound);
             let lit = |alt: [bool; 2]| -> Vec<u32> {
                 Wheel::on_page(0, 1.0)
-                    .draws(pl, true, true, 0, 0, &[0; 16], &alt, true, 1, 0, 0, true, false, false, None)
+                    .draws(pl, true, true, 0, 0, &[0; 16], &alt, true, 1, 0, 0, true, false, true, false, None)
                     .into_iter()
                     .filter_map(|d| if let Draw::Text((t, _, c, _)) = d { (t == "MAIN" || t == "ALT").then_some(c) } else { None })
                     .collect()
@@ -1204,6 +1392,48 @@ mod tests {
 }
 
 #[cfg(test)]
+mod quake_rows {
+    use super::*;
+    #[test]
+    fn quake_rows_click_through_and_fit_a_1080p_window() {
+        // (the Earthquake's three rows: a 1920 x 1080 window's GUI at the default scale is 480 x 270)
+        let rows: Vec<(Rect, QkPiece)> = qk_custom_row();
+        let quake = LASERS.iter().position(|l| l.key == "earthquake").unwrap();
+        let apart = |a: &Rect, b: &Rect| a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+        for (i, (a, p)) in rows.iter().enumerate() {
+            assert!(a.x >= -240.0 && a.x + a.w <= 240.0 && a.y > quake_button(0).y + BTN_H && a.y + a.h <= 135.0, "{p:?}");
+            for (b, _) in &rows[i + 1..] {
+                assert!(apart(a, b));
+            }
+            let (x, y) = (a.x + a.w / 2.0, a.y + a.h / 2.0);
+            let want = match *p {
+                QkPiece::Step(f, d) => Some(Spot::QkStep(f, d)),
+                QkPiece::Switch(f) => Some(Spot::QkStep(f, 1)),
+                _ => None,
+            };
+            if want.is_some() {
+                assert_eq!(spot(x, y, Rows::Quake, page_of(quake)), want, "{p:?}");
+                assert_ne!(spot(x, y, Rows::None, page_of(quake)), want);
+            }
+        }
+        // every field has its piece: the custom one's four numbers, its tsunami, the countdown and the sirens
+        for f in 0..=QK_SIRENS {
+            assert!(rows.iter().any(|(_, p)| matches!(*p, QkPiece::Step(g, _) | QkPiece::Switch(g) if g == f)), "{f}");
+        }
+        // (and each hint fits the line under the ring)
+        let mut w = Wheel::on_page(page_of(quake), 1.0);
+        for (r, p) in &rows {
+            if matches!(p, QkPiece::Label(_) | QkPiece::Value(_)) {
+                continue;
+            }
+            w.hover_at(r.x + r.w / 2.0, r.y + r.h / 2.0, quake);
+            let texts: Vec<String> = w.draws(quake, true, true, 0, 0, &[0; 32], &[false; 2], true, 1, 0, QK_CUSTOM, true, false, true, false, None).into_iter().filter_map(|d| if let Draw::Text((t, ..)) = d { Some(t) } else { None }).collect();
+            assert!(texts.iter().any(|t| t.len() * 6 <= 320 && (t.contains("tsunami") || t.contains("Tsunami") || t.contains("siren") || t.contains("Magnitude") || t.contains("Depth") || t.contains("Shindo") || t.contains("shakes") || t.contains("wave"))), "{p:?}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod layout_dump {
     use super::*;
     /// Writes the wheel's draws for a few states as text lines (`fill x y w h argb`, `text x y rgb centred s`,
@@ -1218,7 +1448,7 @@ mod layout_dump {
             let i = idx(laser);
             let mut w = Wheel::on_page(page_of(i), 3.5);
             w.striking = striking;
-            let draws = w.draws(i, true, false, 0, 0, &[0; 16], &[false; 2], true, 1, 0, 0, false, true, false, Some(288));
+            let draws = w.draws(i, true, false, 0, 0, &[0; 16], &[false; 2], true, 1, 0, 0, false, true, true, false, Some(288));
             let mut out = String::new();
             for d in draws {
                 match d {

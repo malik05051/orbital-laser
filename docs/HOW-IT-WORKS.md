@@ -485,11 +485,16 @@ going in from its middle out as its front reaches them.
 | `/orbital payloadsound main`, `/orbital payloadsound alt` | which blast the Payload plays: the main one, or the alternative (its thump through the ground swaps with it); kept between sessions; also the wheel's BLAST SOUND row |
 | `/orbital nukesound main`, `/orbital nukesound alt` | which blast the Nuke plays: the main one, or the alternative (`blast_alt`, `blast_alt_far`); kept between sessions; also the wheel's BLAST SOUND row |
 | `/orbital impactframes kanada`, `/orbital impactframes blackflash`, `/orbital impactframes cinematic`, `/orbital impactframes off` | the Rod from God's impact frames (a fifth of a second of hard cuts as it strikes) in one of three looks, Kanada the default, or off (`on` brings back the last look); kept between sessions; also the wheel's IMPACT FX row (OFF, KANADA, BLACK FLASH, CINEMATIC), under the ring while the Rod is pointed at or loaded |
-| `/orbital quake custom MW DEPTH [SHINDO]` | the custom earthquake (see the Earthquake); kept |
+| `/orbital quake custom MW DEPTH [SHINDO]` | the custom earthquake (see the Earthquake), Mw 5 to 50, 1 to 1000 km; kept |
+| `/orbital quakeshaking SECONDS\|2m\|auto`, `/orbital quaketsunami yes\|no` | how long the custom earthquake shakes (10 s to 10 min), and its tsunami (from Mw 6.5); kept |
+| `/orbital quakesirens on\|off` | the Earthquake's siren poles and their sounds; kept |
 | `/orbital sirenvolume PERCENT` | the Earthquake's sirens and disaster radio, 0 to 200 %; kept |
 | `/orbital quake tohoku`, `kobe`, `kanto`, `kumamoto`, `noto`, `valdivia` | which historic earthquake the Earthquake plays (`strike::QK_PRESETS`, `qk_preset` takes the key or the button's name); kept as `quake=` in the settings; also the wheel's QUAKE row while the Earthquake is pointed at or loaded |
 | `/orbital foldpattern a`, `b`, `c` | the Fold's crease pattern for its next strike: umbrella (the default), waterbomb or diagonal; kept, also the wheel's FOLD row |
 | `/orbital seed N`, `/orbital seed lock`, `/orbital seed random` | every strike's seed (what its random choices come from, so its look) held at N (1 to 997), held at the last strike's, or a fresh one each strike (the default); kept; also the wheel's SEED field (the last strike's seed, or one typed in it) and LOCK SEED switch, at the top of its left column |
+| `/orbital gravity on`, `/orbital gravity off` | gravity after a strike (`strike/gravity.rs`, `Settle`; on by default, kept): with the terrain on, once a strike is over (ended or stopped) and every world change it left waiting is in, plus 2 s, the land within its reach of the target (`gv_reach`: 64 for the beams up to 360 for the Planet Killer, the Tsunami and the Fold; none for the Supervolcano) is read again in tiles of 24 columns (read 8 wider each way, 48 under each top, the tiles nearest the player first, three asked at a time) and what has nothing holding it up falls. Ground and logs (`Mass`) hold if joined face to face to the land under the read, its edge or something left alone; built blocks (`Built`) hold standing on what holds or within their span of it along a layer (glass and wool 3, wood 5, stone 7, iron and obsidian 12; counted along and across); loose things (plants, torches, doors, beds) go with the block under them; what `stays` names never moves. Two rounds of the two passes, over only what stands over a gap in its column (the unbroken ground under it holds without a look), taken in and worked out a piece a tick under the meter. Near the player (112) it falls as falling blocks (`setblock` to air, then summoned with its whole state, up to 480 a strike), the rest is moved straight down in an edit; also the wheel's GRAVITY switch, in its right column under the stop button's row, for every laser but the Supervolcano |
+| `/orbital tsunamiheight BLOCKS`, `/orbital tsunamiheight max` | the Tsunami's own wave (`TsConfig::height`, `ts_k_for`: its `TsGeo::k` set so the gauge at the target reads that height over its ground; max, `k` 1, the default); kept as `tsunamiheight=`; the wheel's TSUNAMI row (`ts_row`: WAVE HEIGHT steps through `TS_HEIGHTS`, 2 to 120, then MAX). An Earthquake's tsunami keeps its own size |
+| `/orbital tsunamisirens on`, `/orbital tsunamisirens off` | the Tsunami fired on its own warned from the coast's J-Alert siren poles (`own_warning` in tsunami.rs: six poles along the coast inland of the target, built as it fires with the terrain on, then `qk_tsunami_extras`' sirens, title and countdown, its warning by the wave's height); on by default; kept as `tsunamisirens=`; the wheel's SIRENS switch. Every pole's sound is an `Act::Heard` (lib.rs's `heard`): from the pole nearest the player as it plays, its `_far` take past `QT_NEAR` (140), none past `QT_HEAR` (400); the coast recording `quake.siren` played where the player is, fainter by the nearest pole's distance |
 | `/orbital knockback on`, `/orbital knockback off` | the Nuke's, the Rod's, the Fold's, the Supervolcano's and the Carpet Bomb's knockback (`Act::Shove`), the Hurricane's carry and the Tsunami's surge on (the default) or off; kept; the camera's jolt stays either way; also the wheel's KNOCKBACK switch, in its left column under LOCK SEED while the Nuke, the Rod or the Hurricane is pointed at or loaded |
 | `/orbital carryview turn`, `/orbital carryview still` | while the Hurricane carries you: `turn` (the default) turns your view a little with you round the storm and sways it with the gusts, `still` leaves it your own; kept |
 | `/orbital follow on`, `/orbital follow off`, `/orbital follow distance N` | the follow camera (`mod/src/follow.rs`), off by default, kept, 70 blocks out by default (10 to 400): an orbit round the Nuke's or the Payload's bomb (`strike::bomb_path`, the path the pass draws it on), the angle the player's own: the camera sits that far back from the bomb along the way they look, so turning the view orbits it. The mod never turns the view or teleports them while it follows: it gives their velocity a kick each tick (`world.push-player`, on the client, as knockback is), worked out against the game's own drag and gravity (or flight's, read from how they move) to land them on the orbit's next point (never more than 24 blocks a tick, past which the game's collision sweep runs out of budget), so the game's own movement and frame interpolation carry them smoothly. It leaves them once the bomb comes within 440 blocks of where they stand (a player only moves where their chunk is loaded, and going further would load and draw new land), flies out to the orbit over 1.6 s, rides the bomb down, backs off to 380 blocks (the Payload 170) as it bursts, orbits the fireball and the climbing cloud, and at 40 s (32 s), a stop or `follow off` puts them back where they stood with a `tp ... ~ ~`; the knockback is left out meanwhile; also the wheel's FOLLOW switch, in its left column while the Nuke or the Payload is pointed at or loaded |
@@ -1301,8 +1306,9 @@ stands now.
 Mw 7.6 or more at 60 km or shallower. The target is the coast: the sea beyond it (d < 0), the land inland towards the
 player, the sea's surface `SEA` (62).
 
-- **When** (`sea_time`): the warning as the strong shaking peaks; the first wave `/orbital tsunamitime` seconds after it
-  (10 to 300, kept, 60 by default), never sooner than 12 s after the strong shaking; the sea drawing back for the last
+- **When** (`sea_time`): the warning `QT_WARN` (180 s) after the quake begins; the first wave `/orbital tsunamitime`
+  seconds after it (10 to 900, kept; `auto`, the default, a strike's own `QT_AUTO` 180 to 480, `auto_countdown` by its
+  seed, worked out in lib.rs's `fire_at` so the plan and its length agree), never sooner than 12 s after the strong shaking; the sea drawing back for the last
   14 to 26 s before it; the quake's strike ending `TS_T` (9 s) before it, as it hands over (`qk_length`).
 - **The sea drawing back** (`sea_work`): every chunk the sea reaches is recorded as the quake's work leaves it
   (`sea_col`), and from the draw-back each is visited about once a second, the sea's water taken out down to where
@@ -1316,9 +1322,11 @@ player, the sea's surface `SEA` (62).
   coast (`sea_restore`, `Act::Cleanup`: also on a stop), the sirens on until the wave has come and gone, `TSUNAMI
   ARRIVING`, and over the hotbar the coast's gauge (the wave's height at the target over its ground, the highest so far).
   A stop or leaving the world before the hand-over drops it, and the quake's own cleanups put the sea back.
-- **The disaster-prevention radio** (`siren_sites`, `siren_pole`, `sirens`, `eew_alert`): six siren poles, four along
-  the coast near the target and two far off along it inland (iron bars and lightning-rod horns, built at the start with
-  the terrain on, left standing; a column with a lightning rod is left alone by the quake and the sea). For a quake with
+- **The disaster-prevention radio** (`siren_sites`, `site_poles`, `siren_pole_at`, `sirens`, `eew_alert`): six siren
+  poles, four along the coast near the target and two far off along it inland, each moved to the dry land nearest its
+  place (a `world.surface-height` survey round it, 128 blocks every 8, firm ground first; where planned if none, and
+  every sound from a pole heard from where it went up, `sited`) (iron bars and lightning-rod horns, built at the start
+  with the terrain on, left standing; none with `/orbital quakesirens off`; a column with a lightning rod is left alone by the quake and the sea). For a quake with
   an early warning that day (and every custom one from Mw 6) its alert from them as it starts; for a tsunami, from the
   warning until the wave has gone, broadcasts of a chime, the siren in the JMA's pattern (a Major Tsunami Warning's 3 s
   on and 2 s off six times, a Tsunami Warning's 5 s on and 6 s off four times), a closing chime and a pause. Each pole
@@ -1329,13 +1337,19 @@ player, the sea's surface `SEA` (62).
   version. The NHK alert tone (`quake.nhk_alert`, as the warning goes out and as the sea draws back) and a faint coast's
   sirens from further off (`quake.siren`) are the player's own recordings, git-ignored.
 
-**A custom earthquake** (`qk_set_custom`, `/orbital quake custom MW DEPTH [SHINDO]`, kept as `customquake=`, index
-`QK_CUSTOM`): its highest Shindo the player's or worked out from Si and Midorikawa's attenuation at its depth on soft
-ground; a megathrust offshore from Mw 7.6 at 60 km or shallower (with a tsunami: its height `2 * 10^((Mw - 7.5) / 2)`
-metres less for depth), a fault breaking the surface when shallower than 15 km (its slip `10^(Mw/2 - 3.2)` m),
+**A custom earthquake** (`qk_set_custom` with a `QkCustom`, `/orbital quake custom MW DEPTH [SHINDO]`,
+`quakeshaking`, `quaketsunami`, kept as `customquake=mw,depth,shindo,shaking,yes|no`, index `QK_CUSTOM`): magnitude 5
+to 50 (`QK_MW`), depth 1 to 1000 km (`QK_DEPTH`); its highest Shindo (the shaking's strength) the player's or worked
+out from Si and Midorikawa's attenuation at its depth on soft ground; a megathrust offshore when its tsunami is asked
+for, which it may be from Mw 6.5 (`QK_TSU_MW`; its height `2 * 10^((Mw - 7.5) / 2)` metres less for depth, a tenth at
+the least, 30 m at most), a fault breaking the surface when shallower than 15 km (its slip `10^(Mw/2 - 3.2)` m),
 otherwise buried; its rupture as long as Wells and Coppersmith's regression (log L = 0.59 Mw - 2.44), its `kpb` growing
-with its size, its pulses as many as its size and as long as its rupture. The pass draws it as the preset nearest it
-(`qk_pass_preset`).
+with its size, its pulses as many as its size and as long as its rupture, or with its shaking set (`QK_SHAKING`, 10 s
+to 10 min) a rolling coda of weakening pulses filling the rest. The pass draws it as the preset nearest it
+(`qk_pass_preset`), that preset's pulses stretched as long as its own (`QK_TAB_TIME` in the table). The wheel's two
+custom rows (`qk_row`): MAGNITUDE, DEPTH, SHINDO; SHAKING, TSUNAMI, then every Earthquake's ARRIVAL (the tsunami
+countdown, `/orbital tsunamitime`) and SIRENS (`/orbital quakesirens`, which sets `QkConfig::siren` to 0: no poles, no
+sirens, none after the hand-over).
 
 **Its sounds** are approved ones, nothing new: the P waves' `sinkhole.rumble`, each pulse's `supervolcano.tremor` with
 `sinkhole.rumble`, `skybreak.rumble` and `supervolcano.tremor` keeping the roar up through a long pulse and
