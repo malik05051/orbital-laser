@@ -525,6 +525,7 @@ python3 tools/sounds_skybreak.py --only --listen DIR  # the Sky Breaks' sounds m
 tools/preview.py carpetbomb 6 11 15 22 --views cpplayer,cpside,fside  # the Carpet Bomb offscreen (views cp*, its last blast fside, the fires cpfire, the bomber cpskyf, cpskyb)
 tools/preview.py earthquake 5.5 9 22 --set quake=1    # the Earthquake offscreen (views qk*; quake=N the preset, 1 Kobe)
 python3 tools/sounds_quake.py                         # the Earthquake's sirens, chimes and alert (synthesised)
+python3 tools/package_mod.py                          # the release package the fork's launcher installs: dist/orbital-laser-mod.zip + SHA256SUMS (no recordings), released as vX.Y.Z on malik05051/orbital-laser
 python3 tools/sounds_carpetbomb.py                   # the Carpet Bomb's sounds (`--mix CUES OUT` a strike's cues, from cp_write_cues, into one file)
 python3 -I tools/bake_hand.py MESH_DIR               # the hand's sculpted shape baked into mod/assets/sb_hand.bin and the pass's [bake table]
 tools/world_snapshot.py save|restore|reset WORLD [NAME]  # snapshot a world and put it back (refuses while it's open; reset leaves, restores, rejoins)

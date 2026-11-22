@@ -2,9 +2,9 @@
 
 What each release of Orbital Laser added, newest first. The current release is in the [README](../README.md#new-in-0514); each release's notes are in [docs/releases](releases).
 
-## 0.6.0 (not released yet)
+## 0.6.0
 
-Built and installed as 0.6.0, not yet published as a release.
+The release's notes: [docs/releases/v0.6.0.md](releases/v0.6.0.md). It's the first the fork's launcher installs (`tools/package_mod.py`).
 
 - **Sirens for every laser**: every strike but the Earthquake's and the Tsunami's now sounds the J-Alert's general
   alert from the poles round you (`/orbital alertsirens on|off`, kept), on the same poles, distances and volume as
