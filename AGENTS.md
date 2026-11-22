@@ -473,7 +473,7 @@ laser, command, capability and timing). This file is the short, factual version 
   140). Every other laser's strike adds `strike::alert_plan` (`qk_sea::alert_sirens`, `quake.alert`, `/orbital
   alertsirens`) in lib.rs's `fire_at`. Two strikes have no pass (`fire_plain`): `FALSE_ALERT` (`quake::quake_false_plan`,
   `qk_false`, `/orbital quakefalse`, `quakecancel`, `cancelalert` → lib.rs's `cancel_alert`) and `TS_COUNTDOWN`
-  (`tsunami::ts_countdown_plan`, `TsConfig::arrival` up to 3600 s, handing over to the Tsunami through
+  (`tsunami::ts_countdown_plan`, `TsConfig::arrival` up to 1800 s, handing over to the Tsunami through
   `qk_sea::set_pending` and `tsunami_after`, as the Earthquake does). Every tsunami siren is `quake.major`., in the JMA's patterns; the sounds by `tools/sounds_quake.py` (`quake.siren3`,
   `siren5`, `chime_up`, `chime_down`, `eew`, each with `_far`); `quake.nhk_alert`, `quake.siren` and `quake/eew.ogg` (with `eew_far`, which `build_mod.py`
   puts in for `quake.eew` when present) are the user's own recordings, git-ignored. The pass sways the whole picture by the shaking where the camera is (never a pixel by where it

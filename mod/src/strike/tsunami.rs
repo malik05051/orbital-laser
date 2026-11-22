@@ -100,12 +100,12 @@ pub struct TsConfig {
     pub sirens: bool,
     pub siren: f32,
     /// Seconds from its warning to its wave reaching the coast (`/orbital tsunamiarrival`, the wheel's ARRIVAL; kept):
-    /// 0 at once, as fired; else a countdown first (`ts_countdown_plan`), up to an hour.
+    /// 0 at once, as fired; else a countdown first (`ts_countdown_plan`), up to half an hour.
     pub arrival: u32,
 }
 /// The steps ARRIVAL goes through (seconds; 0 now), and the most it may be set to.
-pub const TS_ARRIVALS: [u32; 12] = [0, 60, 120, 180, 300, 600, 900, 1200, 1800, 2400, 3000, 3600];
-pub const TS_ARRIVAL_MAX: u32 = 3600;
+pub const TS_ARRIVALS: [u32; 11] = [0, 60, 120, 180, 300, 420, 600, 900, 1200, 1500, 1800];
+pub const TS_ARRIVAL_MAX: u32 = 1800;
 /// ARRIVAL a step earlier or later.
 pub fn ts_arrival_step(dir: i8) {
     let mut c = ts_config();
@@ -1331,20 +1331,20 @@ mod tests {
         assert!(plan.iter().all(|(_, a)| !matches!(a, Act::Cmd(c) if c.contains("forceload"))));
     }
     #[test]
-    fn the_tsunami_fired_with_an_arrival_warns_and_counts_down_for_up_to_an_hour_then_hands_over() {
+    fn the_tsunami_fired_with_an_arrival_warns_and_counts_down_for_up_to_half_an_hour_then_hands_over() {
         let target = Target { block: [0, 64, 0], point: [0.5, 65.0, 0.5] };
         let me = [0.5, 65.0, 400.0];
         // (a small one, 2 m: its warning still on the player's Major Tsunami Warning siren)
-        ts_configure(TsConfig { height: Some(2), sirens: true, siren: 1.0, arrival: 3600 });
+        ts_configure(TsConfig { height: Some(2), sirens: true, siren: 1.0, arrival: 1800 });
         ts_set_scale(ts_k_for(&target, me, 3.0, Some(2)));
         let (plan, len) = ts_countdown_plan(the_laser(), &target, false, 3.0, me);
         ts_set_scale(1.0);
-        assert!((f64::from(len) - (3600.0 - TS_T)).abs() < 1e-3, "{len}");
+        assert!((f64::from(len) - (1800.0 - TS_T)).abs() < 1e-3, "{len}");
         let first = plan.iter().find_map(|(_, a)| if let Act::Cmd(c) = a { c.contains("wave in").then(|| c.clone()) } else { None }).unwrap();
-        assert!(first.contains("wave in 60:00"), "{first}");
+        assert!(first.contains("wave in 30:00"), "{first}");
         assert!(plan.iter().any(|(_, a)| matches!(a, Act::Sound { event, .. } if event == "orbital:quake.nhk_alert")));
         let sirens: Vec<&String> = plan.iter().filter_map(|(_, a)| if let Act::Heard { event, .. } = a { Some(event) } else { None }).collect();
-        assert!(sirens.len() > 300 && sirens.iter().all(|e| e.as_str() == "orbital:quake.major" || e.as_str() == "orbital:quake.siren"), "{}", sirens.len());
+        assert!(sirens.len() > 150 && sirens.iter().all(|e| e.as_str() == "orbital:quake.major" || e.as_str() == "orbital:quake.siren"), "{}", sirens.len());
         assert!(plan.iter().all(|(t, a)| *t <= len + 6.0 && !matches!(a, Act::Blocks(_) | Act::Read { .. } | Act::Table(_))));
         // (the hand-over waiting: the Tsunami at the target, its wave at the size set, its sirens on)
         let h = super::super::qk_sea::take_pending().expect("handed over as it ends");
@@ -1355,7 +1355,7 @@ mod tests {
         assert!((f64::from(len) - (120.0 - TS_T)).abs() < 1e-3);
         assert!(plan.iter().all(|(_, a)| !matches!(a, Act::Heard { .. })));
         assert_eq!(super::super::qk_sea::take_pending().map(|h| h.siren), Some(0.0));
-        // (the steps: now, then minutes up to an hour)
+        // (the steps: now, then minutes up to half an hour, no further)
         ts_configure(TsConfig { height: None, sirens: true, siren: 1.0, arrival: 0 });
         ts_arrival_step(-1);
         assert_eq!(ts_config().arrival, 0);
@@ -1366,7 +1366,7 @@ mod tests {
         }
         assert_eq!(ts_config().arrival, TS_ARRIVAL_MAX);
         assert_eq!(ts_arrival_text(0), "NOW");
-        assert_eq!(ts_arrival_text(3600), "60m");
+        assert_eq!(ts_arrival_text(1800), "30m");
         ts_configure(TsConfig { height: None, sirens: true, siren: 1.0, arrival: 0 });
     }
     /// A wooded land with a village's block of houses, flat, the grass at the target's ground.

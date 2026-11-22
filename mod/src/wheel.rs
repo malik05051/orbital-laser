@@ -1060,7 +1060,7 @@ impl Wheel {
             ),
             Some(Spot::TsStep(d)) => (format!("Wave height at the coast {} (2 m to 120 m, or MAX)", if d.abs() >= 2 { "by 3 steps" } else { "a step" }), 0x8C93A0),
             Some(Spot::TsSirens) => ("J-Alert siren poles warn of the wave (heard near them)".to_string(), 0x8C93A0),
-            Some(Spot::TsArrival(_)) => ("First wave after the warning: NOW, or 1 to 60 min".to_string(), 0x8C93A0),
+            Some(Spot::TsArrival(_)) => ("First wave after the warning: NOW, or 1 to 30 min".to_string(), 0x8C93A0),
             Some(Spot::CancelAlert) => ("Cancel the false alert now: its cancellation plays".to_string(), 0x8C93A0),
             Some(Spot::Knock) => ("Push on you: thrown by blasts, waves and Shindo 6+ shaking".to_string(), 0x8C93A0),
             Some(Spot::Follow) => ("Camera chases the Nuke's or Payload's bomb down".to_string(), 0x8C93A0),

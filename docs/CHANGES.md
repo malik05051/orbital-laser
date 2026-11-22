@@ -12,7 +12,7 @@ What each release of Orbital Laser added, newest first. The current release is i
   called off, the EEW's cancellation sounding and "Earthquake alert canceled" on the screen. The wheel's CANCEL (beside
   STOP while one runs) or `/orbital cancelalert` calls it off at once.
 - **The Tsunami's arrival** (the wheel's ARRIVAL on its row, `/orbital tsunamiarrival`): fired on its own its wave can
-  come up to an hour after its warning, with a countdown, NHK's alert tone and the poles' sirens first.
+  come up to 30 minutes after its warning, with a countdown, NHK's alert tone and the poles' sirens first.
 - **Every tsunami warns with your recordings**: a smaller tsunami (under 3 m) sounded the synthesised siren; every one now
   sounds the Major Tsunami Warning's siren, and the Tsunami fired on its own NHK's alert tone, as Tohoku does.
 - **Gravity after a strike** (`/orbital gravity on|off`, the wheel's GRAVITY switch, on by default, kept): as a
