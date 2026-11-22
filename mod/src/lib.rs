@@ -2778,7 +2778,7 @@ impl Mod for Orbital {
                         Ok(Some(if n == 0 { "Tsunami arrival: now (the wave at once, as fired)".to_string() } else { format!("Tsunami arrival: the wave {} after its warning (the Tsunami fired on its own)", countdown_text(n)) }))
                     }
                     None => Ok(Some(format!("Tsunami arrival: {} (/orbital tsunamiarrival SECONDS, 5m, or now)", if c.arrival == 0 { "now".to_string() } else { countdown_text(c.arrival) }))),
-                    _ => Err(format!("/orbital tsunamiarrival SECONDS (10 to {max}), MINUTES with an m (45m, up to 60m), or now")),
+                    _ => Err(format!("/orbital tsunamiarrival SECONDS (10 to {max}), MINUTES with an m (5m, up to 30m), or now")),
                 }
             }
             (Some("quakefalse"), Some(v @ ("on" | "off"))) => {
