@@ -167,6 +167,9 @@ const QK_TAB_AFTER: u32 = 0u;
 const QK_TAB_SEA: u32 = 52u;
 // How much longer the strike's subevents run than the preset's drawn here (a custom quake shaking as long as set).
 const QK_TAB_TIME: u32 = 58u;
+// Where the sea draws back if the tsunami was moved to the coast the player is near (qk_sea.rs's relocate): the shore's
+// x and z and the way inland; 0, 0 the target's coast (F's).
+const QK_TAB_COAST: u32 = 59u;
 fn qk_tab(i: u32) -> f32 {
     if (i >= arrayLength(&mod_data)) {
         return 0.0;
@@ -407,9 +410,18 @@ fn earthquake(in: StageIn) -> vec4<f32> {
     let draw_t = qk_tab(QK_TAB_SEA);
     if (draw_t > 0.0 && t > draw_t && t < qk_tab(QK_TAB_SEA + 4u) + 0.6 && !sky) {
         let w = cam + rel;
-        let q = w.xz - F.t;
-        let u = dot(q, F.st);
-        let dd = dot(q, F.nm);
+        var ct = F.t;
+        var cs = F.st;
+        var cn = F.nm;
+        let moved = vec2<f32>(qk_tab(QK_TAB_COAST + 2u), qk_tab(QK_TAB_COAST + 3u));
+        if (dot(moved, moved) > 0.5) {
+            ct = vec2<f32>(qk_tab(QK_TAB_COAST), qk_tab(QK_TAB_COAST + 1u));
+            cn = moved;
+            cs = vec2<f32>(moved.y, -moved.x);
+        }
+        let q = w.xz - ct;
+        let u = dot(q, cs);
+        let dd = dot(q, cn);
         let sea_y = qk_tab(QK_TAB_SEA + 5u);
         let inside = (1.0 - smoothstep(170.0, 184.0, abs(u))) * (1.0 - smoothstep(110.0, 122.0, -dd)) * (1.0 - smoothstep(0.0, 6.0, dd));
         if (inside > 0.0) {

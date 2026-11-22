@@ -417,7 +417,7 @@ fn cp_blast_rows(q: &mut Plan, land: &mut Land, b: &Blast, n: u8, k0: i32, k1: i
     let rr = b.reach().ceil() as i32;
     let (ix, iz) = (b.cx.floor() as i32, b.cz.floor() as i32);
     let mut out = Blocks::default();
-    crate::meter::spend(2_500 * ((k1 - k0) * (2 * rr + 1)) as u64);
+    crate::meter::spend(2_500 * ((k1 - k0) * (2 * rr + 1)).max(0) as u64);
     let reach2 = b.reach() * b.reach();
     for z in iz - rr + k0..iz - rr + k1 {
         let dz = f64::from(z) + 0.5 - b.cz;
@@ -535,7 +535,7 @@ fn cp_felled(q: &mut Plan, land: &mut Land, b: &Blast, k0: i32, k1: i32) {
     let rr = b.reach().ceil() as i32;
     let (ix, iz) = (b.cx.floor() as i32, b.cz.floor() as i32);
     let mut out = Blocks { clear_of_player: true, ..Default::default() };
-    crate::meter::spend(300 * ((k1 - k0) * (2 * rr + 1)) as u64);
+    crate::meter::spend(300 * ((k1 - k0) * (2 * rr + 1)).max(0) as u64);
     for z in iz - rr + k0..iz - rr + k1 {
         for x in ix - rr..=ix + rr {
             let Some(i) = land.known(x, z) else { continue };

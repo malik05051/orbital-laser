@@ -284,8 +284,12 @@ Twenty lasers, five to a page of the wheel.
   offshore when it raises a tsunami, a fault tearing the surface when shallower than 15 km, otherwise buried; its
   rupture as long and in as many pulses as its size gives.
 
-  **The tsunami** (Tohoku, Kanto, Noto, Valdivia, and a custom quake with TSUNAMI on). **Aim at the coast**: the sea is taken
-  to lie beyond the target, at the sea's level (y 62), and the land inland towards you. Three minutes after the quake
+  **The tsunami** (Tohoku, Kanto, Noto, Valdivia, and a custom quake with TSUNAMI on). **It comes to the coast you are
+  near**, as a great quake's tsunami reaches every coast for hundreds of kilometres: some twenty seconds before the sea
+  draws back, the land round you (about 176 blocks) is asked where the sea is, and the nearest open sea (not a river or a
+  pond) is the one that withdraws and the wave comes in from, wherever you have gone since the quake. With no sea near
+  you it comes to the target's coast as fired, the sea taken to lie beyond the target at the sea's level (y 62).
+  Three minutes after the quake
   begins (as the JMA's was for Tohoku) its **Major Tsunami Warning** goes out with its expected height ("10 m+" for
   Tohoku, "5 m" for Noto), and a **countdown** to the first wave runs over the hotbar: by default a strike's own three
   to eight minutes, or the wheel's ARRIVAL or `/orbital tsunamitime SECONDS` (10 to 900, or minutes as `5m`; `auto` back to random; kept),
@@ -293,23 +297,25 @@ Twenty lasers, five to a page of the wheel.
   the seabed (real water taken out, the bed glistening wet, water streaming back out to sea),
   and **the wave comes**: the Tsunami strike itself, its animation, its surge over the land, its debris and its carry,
   but at the quake's own size, about 12 m for Tohoku instead of a wall hundreds of blocks high, sweeping only the land
-  it is deep enough over, from the side the sea drew back from wherever you have gone since. It runs up the land to where you stand, up to three times its height at the coast (Tohoku's
+  it is deep enough over, from the sea that drew back. It runs up the land to where you stand, up to three times its height at the coast (Tohoku's
   ran up to 40 m); higher ground than that stays dry. The withdrawn sea comes back with it, and the hotbar gives what the coast's gauge observes and
   the highest so far.
 
-  **The coast's sirens.** Six J-Alert siren poles stand along the coast (an iron post with loudspeaker horns; built as
-  the strike starts with the terrain on, and they stay; four close to the target, two far off along the coast inland),
-  each on the dry land nearest its place, never in the sea. The wheel's SIRENS or `/orbital quakesirens off` leaves
-  them out, and their sounds with them.
+  **Sirens everywhere on land.** As every Japanese town has them, J-Alert siren poles (an iron post with loudspeaker
+  horns) stand all over the land: one in each 160-block square near you, put up as you come near it, wherever you go
+  (walked, flown or teleported), on the dry land nearest the square's middle; a square that is all sea has none. They
+  are built with the terrain on, and they stay. The wheel's SIRENS or `/orbital quakesirens off` leaves them out, and
+  their sounds with them; the alert on your phone and the TV's still sound where you are.
   They sound as Japan's disaster-prevention radio does: a quake's early warning alert as it starts, and for a tsunami
   each broadcast a chime, the siren in the JMA's pattern (a Major Tsunami Warning's 3 s on and 2 s off, a Tsunami
   Warning's 5 s on and 6 s off), a closing chime, again and again until the wave has come. After each broadcast's closing chime comes a pause where its announcement is
-  spoken, before the next. Each pole is its own station,
-  started some seconds apart from the next and heard late and fainter by its distance, the far ones muffled and
-  echoing: one wails close by while another answers from far off. `/orbital sirenvolume PERCENT` (0 to 200, kept; 100
+  spoken, before the next. Each is heard from the nearest pole that is up, fainter the further off, the far ones
+  muffled and echoing, and neighbouring poles are set off some seconds apart: one wails close by while another answers
+  from further off. At sea, far from any pole, you hear none. `/orbital sirenvolume PERCENT` (0 to 200, kept; 100
   by default, 0 silences them) sets their volume. Their sounds fade out with distance over about 400 blocks. Your own recordings of the
   Earthquake Early Warning's chime and of a Major Tsunami Warning's siren can replace the synthesised ones:
-  `python3 tools/sounds_quake.py --eew-recording PATH --major-recording PATH` before building. The sirens, chimes and alert are synthesised by `tools/sounds_quake.py`
+  `python3 tools/sounds_quake.py --eew-recording PATH --major-recording PATH` before building (and `--alert-recording PATH`
+  for the poles' general alert, `--cancel-recording PATH` for a false alert's cancellation; all kept out of the repository). The sirens, chimes and alert are synthesised by `tools/sounds_quake.py`
   (nothing recorded). NHK's alert tone, and a recording of a coast's sirens heard faintly from further off, are your own
   recordings if you add them: put them in `orbital-sounds/assets/orbital/sounds/quake/` as `nhk_alert.ogg` and
   `siren.ogg` before building (they are kept out of the repository).
@@ -543,6 +549,10 @@ The wheel also has:
 | `/orbital quakeshaking SECONDS\|2m\|auto` | how long the custom earthquake shakes, 10 s to 10 min (`auto`: as long as its rupture); kept; the wheel's SHAKING |
 | `/orbital quaketsunami yes\|no` | whether the custom earthquake raises a tsunami (yes only from magnitude 6.5); kept; the wheel's TSUNAMI |
 | `/orbital quakesirens on\|off` | the Earthquake's J-Alert siren poles and their sounds (on by default); kept; the wheel's SIRENS |
+| `/orbital quakefalse on\|off` | a false earthquake alert: the Earthquake Early Warning goes out for the quake picked (the phone's chime, the poles', the warning over the hotbar) but no quake comes, and it is called off later ("Earthquake alert canceled", with the EEW's cancellation sound); off by default; kept; the wheel's FALSE ALERT at the end of the QUAKE row |
+| `/orbital quakecancel SECONDS\|2m` | how long after a false alert's warning it is canceled, 10 s to 10 min (1 min by default); kept; the wheel's CANCEL IN (in SHAKING's place while FALSE ALERT is on) |
+| `/orbital cancelalert` | a false alert under way canceled now; also the wheel's CANCEL beside STOP while one is |
+| `/orbital alertsirens on\|off` | the J-Alert poles' general alert for every laser but the Earthquake and the Tsunami: poles put up on the land round you, sounding the alert as the strike runs, heard from the nearest as all sirens are, at `/orbital sirenvolume` (on by default); kept |
 | `/orbital tsunamitime SECONDS\|5m\|auto` | the countdown from an Earthquake's tsunami warning (3 minutes after the quake) to its first wave, 10 to 900 seconds or minutes as `5m`; `auto` (the default) a strike's own 3 to 8 minutes; kept |
 | `/orbital sirenvolume PERCENT` | the Earthquake's sirens and disaster radio, 0 to 200 (100 by default; 0 none); kept |
 | `/orbital terrain on\|off` | terrain damage on, or off (light and sound only) |
@@ -557,7 +567,8 @@ The wheel also has:
 | `/orbital foldpattern a\|b\|c` | the Fold's crease pattern for its next strike: umbrella (the default), waterbomb or diagonal; kept, also the wheel's FOLD row |
 | `/orbital gravity on\|off` | gravity after a strike (on by default, kept): with the terrain on, once a strike is over, whatever it left with nothing holding it up comes down (walls blown out at their foot, floors past their span, lumps of land cut free), as falling blocks near you; also the wheel's GRAVITY switch |
 | `/orbital tsunamiheight BLOCKS\|max` | the Tsunami's own wave, its height at the coast (2 to 120 on the wheel, any 1 to 400 here; `max` as big as it comes, the default); kept; also the wheel's WAVE HEIGHT row with the Tsunami pointed at |
-| `/orbital tsunamisirens on\|off` | whether the coast's J-Alert siren poles go up and warn of the Tsunami fired on its own (on by default; kept); heard only near them, as all sirens now are; also the wheel's SIRENS switch |
+| `/orbital tsunamisirens on\|off` | whether the J-Alert siren poles go up on the land round you and warn of the Tsunami fired on its own (on by default; kept); heard only near them, as all sirens now are; also the wheel's SIRENS switch |
+| `/orbital tsunamiarrival SECONDS\|5m\|now` | the Tsunami fired on its own: its wave reaching the coast this long after its warning (10 s to 60 min), a countdown first with the JMA's warning, NHK's tone and the poles' sirens; `now` (the default) at once as fired; kept; the wheel's ARRIVAL on the Tsunami's row |
 | `/orbital knockback on\|off` | the Nuke's, the Rod's, the Fold's and the Carpet Bomb's last blast's push on you as the blast reaches you, the Supervolcano's ash wall's shove (the camera's jolt stays), and whether the Hurricane's wind or the Tsunami's water carries you off; also the wheel's KNOCKBACK switch |
 | `/orbital carryview turn\|still` | while the Hurricane carries you, your view turns a little with you round the storm and sways with the gusts (`turn`, the default), or stays your own (`still`); kept |
 | `/orbital follow on\|off` | the follow camera: an orbit round the Nuke's or the Payload's bomb as it comes in. Your mouse sets the angle (the camera sits 70 blocks back along your view), it backs off as the burst nears and orbits the fireball and the cloud, then puts you back where you stood; also the wheel's FOLLOW switch. Pairs well with the Cinematic Camera key (Options > Controls > Key Binds > Miscellaneous) |

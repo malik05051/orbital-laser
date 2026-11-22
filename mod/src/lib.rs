@@ -135,6 +135,9 @@ thread_local! {
     static UNAVAILABLE: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 const SETTINGS: &str = "settings";
+/// The strikes with no laser's pass: a false earthquake alert, and the Tsunami's countdown to its wave (`fire_plain`).
+const FALSE_ALERT: &str = "falsealert";
+const TS_COUNTDOWN: &str = "tsunamicountdown";
 /// The storage key that says which pass the game is building while it builds one (`Orbital::hand_post`).
 const BUILDING: &str = "building";
 /// The storage key holding the forceload removes the strike under way owes the world, with its dimension and the
@@ -309,7 +312,12 @@ fn command_paths() -> Vec<String> {
     }
     for v in ["on", "off"] {
         add(&["quakesirens", v]);
+        add(&["quakefalse", v]);
+        add(&["alertsirens", v]);
     }
+    add(&["tsunamiarrival", "now"]);
+    add(&["quakecancel"]);
+    add(&["cancelalert"]);
     for a in strike::APPROACHES.iter() {
         add(&["approach", a.key]);
     }
@@ -704,7 +712,7 @@ impl Orbital {
     }
     fn save(&self) {
         let text = format!(
-            "laser={}\nterrain={}\nhud={}\napproach={}\narrival={}\npage={}\nflyspeed={}\npayloadsound={}\nnukesound={}\nquality={}\nimpactframes={}\nfoldpattern={}\nquake={}\ntsunamitime={}\nsirenvolume={}\ntsunamiheight={}\ntsunamisirens={}\ncustomquake={}\nquakesirens={}\nknockback={}\ngravity={}\ncarryview={}\nfollow={}\nfollowdistance={}\nseed={}\n",
+            "laser={}\nterrain={}\nhud={}\napproach={}\narrival={}\npage={}\nflyspeed={}\npayloadsound={}\nnukesound={}\nquality={}\nimpactframes={}\nfoldpattern={}\nquake={}\ntsunamitime={}\nsirenvolume={}\ntsunamiheight={}\ntsunamisirens={}\ncustomquake={}\nquakesirens={}\ntsunamiarrival={}\nquakefalse={}\nquakecancel={}\nalertsirens={}\nknockback={}\ngravity={}\ncarryview={}\nfollow={}\nfollowdistance={}\nseed={}\n",
             LASERS[self.laser].key,
             u8::from(self.terrain),
             u8::from(self.hud),
@@ -728,6 +736,10 @@ impl Orbital {
                 format!("{},{},{},{},{}", c.mw, c.depth, auto(c.shindo), auto(c.shaking), if c.tsunami { "yes" } else { "no" })
             },
             if self.quake_sirens { "on" } else { "off" },
+            strike::ts_config().arrival,
+            if strike::qk_false().on { "on" } else { "off" },
+            strike::qk_false().cancel,
+            if strike::alert_config().on { "on" } else { "off" },
             if self.knock { "on" } else { "off" },
             if self.gravity { "on" } else { "off" },
             if self.carry_turn { "turn" } else { "still" },
@@ -835,6 +847,18 @@ impl Orbital {
                     }
                 }
                 Some(("quakesirens", v)) => quake_sirens = v != "off",
+                Some(("tsunamiarrival", v)) => {
+                    let mut c = strike::ts_config();
+                    c.arrival = v.parse::<u32>().map_or(0, |n| if n == 0 { 0 } else { n.clamp(10, strike::TS_ARRIVAL_MAX) });
+                    strike::ts_configure(c);
+                }
+                Some(("quakefalse", v)) => strike::qk_set_false(strike::QkFalse { on: v == "on", ..strike::qk_false() }),
+                Some(("quakecancel", v)) => {
+                    if let Ok(n) = v.parse::<u32>() {
+                        strike::qk_set_false(strike::QkFalse { cancel: n, ..strike::qk_false() });
+                    }
+                }
+                Some(("alertsirens", v)) => strike::alert_configure(strike::AlertConfig { on: v != "off", ..strike::alert_config() }),
                 Some(("tsunamitime", v)) => tsunami_time = v.parse::<u32>().ok().map_or(0, |n| n.clamp(10, strike::QT_COUNTDOWN_MAX as u32)),
                 Some(("knockback", v)) => knock = v != "off",
                 Some(("gravity", v)) => gravity = v != "off",
@@ -942,6 +966,7 @@ impl Orbital {
     fn open_wheel(&mut self) {
         let mut w = wheel::Wheel::on_page(self.page, self.fly);
         w.striking = self.strike.is_some();
+        w.alerting = self.alerting();
         if let Some(c) = ui::cursor() {
             w.hover_at(c.x, c.y, self.laser);
         }
@@ -1054,11 +1079,15 @@ impl Orbital {
                 world::play_sound("minecraft:ui.button.click", None, 0.6, if self.terrain { 1.6 } else { 1.0 });
                 self.show_wheel();
             }
-            Some(wheel::Spot::Stop) if self.strike.is_some() => {
+            Some(wheel::Spot::CancelAlert) if self.alerting() => {
+                world::play_sound("minecraft:ui.button.click", None, 0.6, 1.4);
+                self.cancel_alert();
+            }
+            Some(wheel::Spot::Stop | wheel::Spot::CancelAlert) if self.strike.is_some() => {
                 world::play_sound("minecraft:ui.button.click", None, 0.6, 0.8);
                 self.stop_strike();
             }
-            Some(wheel::Spot::Stop) => {}
+            Some(wheel::Spot::Stop | wheel::Spot::CancelAlert) => {}
             Some(wheel::Spot::Quality) => {
                 self.set_quality(!self.fast);
                 world::play_sound("minecraft:ui.button.click", None, 0.6, if self.fast { 1.6 } else { 1.0 });
@@ -1090,6 +1119,17 @@ impl Orbital {
                         self.quake_sirens = !self.quake_sirens;
                         self.quake_sirens
                     }
+                    // (a false alert: on or off, and when it is called off)
+                    wheel::QK_FALSE => {
+                        let mut c = strike::qk_false();
+                        c.on = !c.on;
+                        strike::qk_set_false(c);
+                        c.on
+                    }
+                    wheel::QK_CANCEL => {
+                        strike::qk_cancel_step(d);
+                        d > 0
+                    }
                     // (the custom one's: a step picks it)
                     _ => {
                         let q = strike::qk_custom_step(f, d);
@@ -1103,6 +1143,12 @@ impl Orbital {
             }
             Some(wheel::Spot::TsStep(d)) => {
                 strike::ts_height_step(d);
+                self.save();
+                world::play_sound("minecraft:ui.button.click", None, 0.6, if d > 0 { 1.5 } else { 1.1 });
+                self.show_wheel();
+            }
+            Some(wheel::Spot::TsArrival(d)) => {
+                strike::ts_arrival_step(d);
                 self.save();
                 world::play_sound("minecraft:ui.button.click", None, 0.6, if d > 0 { 1.5 } else { 1.1 });
                 self.show_wheel();
@@ -1388,6 +1434,10 @@ impl Orbital {
             _ => me,
         };
         let target = Target { block: [block[0], block[1], block[2]], point: [point[0], point[1], point[2]] };
+        // (a hand-over an earlier strike left and never took: not this one's)
+        if strike::qk_active_sea().is_none() {
+            drop(strike::qk_take_pending());
+        }
         let clock = game::get_clock().map_or(0, |c| c.game_time);
         // a fresh look every strike, unless one is held (`/orbital seed`)
         let seed = self.seed_lock.unwrap_or((clock % u64::from(SEEDS)) as u32 + 1);
@@ -1416,7 +1466,24 @@ impl Orbital {
             strike::ts_configure(c);
             strike::ts_set_scale(strike::ts_k_for(&target, me, seed, c.height));
         }
-        let plan = strike::plan(laser, &target, self.terrain, &dimension, seed, me, option);
+        // (a false earthquake alert, and the Tsunami fired on its own with an arrival set: their warnings only, no pass)
+        if laser.key == "earthquake" && strike::qk_false().on {
+            let plan = strike::false_alert_plan(&target, self.terrain, seed, me, self.quake);
+            self.fire_plain(FALSE_ALERT, plan, strike::qk_false_length(), None, block);
+            return;
+        }
+        if own_tsunami && strike::ts_config().arrival > 0 {
+            let (plan, length) = strike::ts_countdown(&target, self.terrain, seed, me);
+            strike::ts_set_scale(1.0);
+            self.fire_plain(TS_COUNTDOWN, plan, length, Some((block, point)), block);
+            return;
+        }
+        let mut plan = strike::plan(laser, &target, self.terrain, &dimension, seed, me, option);
+        // (every other laser: the J-Alert's general alert from the poles round the player, at the sirens' volume)
+        if laser.key != "earthquake" && laser.key != "tsunami" {
+            strike::alert_configure(strike::AlertConfig { on: strike::alert_config().on, vol: self.siren_volume as f32 / 100.0 });
+            plan.extend(strike::alert_plan(laser, &target, self.terrain, seed, me, f64::from(laser.length)));
+        }
         // (the Fold asks how low the land lies round the target; `tick` takes the answer in)
         let level_tag = (laser.key == "fold").then(|| {
             let tag = ground::new_tag();
@@ -1511,6 +1578,25 @@ impl Orbital {
             && let Some(path) = strike::bomb_path(laser.key, &target, seed, me)
         {
             self.following = Some(follow::Follow::new(path, me, self.follow_distance));
+        }
+    }
+    /// A strike with no pass of its own, only its plan: a false earthquake alert (`FALSE_ALERT`) or the Tsunami's
+    /// countdown to its wave (`TS_COUNTDOWN`, handing over to the Tsunami at `after` as it ends).
+    fn fire_plain(&mut self, key: &'static str, plan: Vec<(f32, Act)>, length: f32, after: Option<([i32; 3], [f64; 3])>, block: [i32; 3]) {
+        meter::spend(FIRE_COST);
+        render::clear_post();
+        let mut params = [0.0f32; 16];
+        params[4] = block[0] as f32 + 0.5;
+        params[5] = block[2] as f32 + 0.5;
+        self.skip = 0.0;
+        let mut plan = plan;
+        plan.sort_by(|a, b| a.0.total_cmp(&b.0));
+        log::write(log::Level::Info, &format!("strike [{key}] at {} {} {}, {length:.0} s", block[0], block[1], block[2]));
+        self.strike = Some(Strike { plan, next: 0, more: Default::default(), given: 0, ticks: 0, length, params, level: None, waiting: Default::default(), urgent: Default::default(), data: Vec::new(), data_sent: true, skipped: 0.0, wait: 0, sounds: Default::default(), key, sprites: 0, hand: None, hand_t: 0.0, tsunami_after: after });
+        self.unfollow();
+        if let Some(w) = &mut self.wheel {
+            w.striking = true;
+            w.alerting = key == FALSE_ALERT;
         }
     }
     /// One tick of the strike: everything due by now, in one batch.
@@ -1619,9 +1705,9 @@ impl Orbital {
                     Some(cost) => self.carving.push_back((cost, c)),
                     None => cmds.push(c),
                 },
-                Act::Heard { event, far, at, volume, near, reach, here } => {
-                    // (from where its poles went up, on the land: strike::qk_sited)
-                    let at: Vec<[f64; 3]> = at.into_iter().map(strike::qk_sited).collect();
+                Act::Heard { event, far, at, volume, near, reach, here, net } => {
+                    // (a siren's: from the J-Alert poles up on the land round the player as it plays)
+                    let at: Vec<[f64; 3]> = net.map_or(at, strike::qk_net_heard);
                     if let Some(p) = game::get_player()
                         && let Some((ev, at, volume)) = heard(&event, &far, &at, volume, near, reach, here, [p.x, p.y, p.z])
                     {
@@ -1736,8 +1822,10 @@ impl Orbital {
             let (key, at) = (s.key, (s.params[4].floor() as i32, s.params[5].floor() as i32));
             self.end_strike();
             self.settle_after(key, at);
-            if let (Some((block, point)), Some(h)) = (after, strike::qk_take_pending()) {
-                log::write(log::Level::Info, &format!("earthquake: its tsunami comes, the wave at {:.2} of the Tsunami's", h.k));
+            if let (Some(after), Some(h)) = (after, strike::qk_take_pending()) {
+                // (to the coast the player was near as the sea drew back, if one was found; else the quake's target)
+                let (block, point) = h.coast.unwrap_or(after);
+                log::write(log::Level::Info, &format!("earthquake: its tsunami comes at {} {} {}, the wave at {:.2} of the Tsunami's", block[0], block[1], block[2], h.k));
                 strike::ts_set_scale(h.k);
                 strike::qk_activate(h);
                 self.fire_at(&lasers::TSUNAMI, block, point);
@@ -1840,8 +1928,27 @@ impl Orbital {
         }
         if let Some(w) = &mut self.wheel {
             w.striking = false;
+            w.alerting = false;
             self.show_wheel();
         }
+    }
+    /// Whether a false earthquake alert is under way (`strike::qk_false`).
+    fn alerting(&self) -> bool {
+        self.strike.as_ref().is_some_and(|s| s.key == FALSE_ALERT)
+    }
+    /// A false earthquake alert called off now (`/orbital cancelalert`, the wheel's CANCEL): its warning's sounds cut,
+    /// its cancellation played and shown at once, the strike over.
+    fn cancel_alert(&mut self) -> bool {
+        if !self.alerting() {
+            return false;
+        }
+        let cmds: Vec<String> = self.strike.as_ref().map_or(Vec::new(), |s| s.sounds.iter().map(|e| format!("stopsound @s * {e}")).collect());
+        world::run_commands(&cmds);
+        self.end_strike();
+        world::run_commands(&strike::qk_cancel_cmds());
+        world::play_sound("orbital:quake.cancel", None, 0.9, 1.0);
+        log::write(log::Level::Info, "earthquake: the false alert canceled now");
+        true
     }
     /// Stop the strike under way: the rest of its plan and the world changes still waiting are dropped and its sounds
     /// cut short, but the chunks it force-loaded are let go (what it has already done to the world stays).
@@ -2150,6 +2257,10 @@ impl Orbital {
             if l.key == "tsunami" {
                 let c = strike::ts_config();
                 lines.push((format!("Wave: {} at the coast, sirens {}", strike::ts_height_text(c.height), if c.sirens { "on" } else { "off" }), 0x6FC8FF));
+                lines.push((if c.arrival == 0 { "Arrival: now".to_string() } else { format!("Arrival: {} after the warning", countdown_text(c.arrival)) }, 0x6FC8FF));
+            }
+            if l.key != "earthquake" && l.key != "tsunami" && !strike::alert_config().on {
+                lines.push(("Alert sirens: off".to_string(), 0xA8B0BC));
             }
             if l.key == "earthquake" {
                 let q = strike::qk_quake(self.quake);
@@ -2158,7 +2269,10 @@ impl Orbital {
                 if self.quake == strike::QK_CUSTOM && strike::qk_custom_inputs().shaking.is_some() {
                     lines.push((format!("Shaking for {}", shaking_words(strike::qk_custom_inputs().shaking)), 0xE8A33C));
                 }
-                if let Some(ts) = &q.tsunami {
+                let fa = strike::qk_false();
+                if fa.on {
+                    lines.push((format!("False alert: canceled {} after", countdown_text(fa.cancel)), 0xF0C060));
+                } else if let Some(ts) = &q.tsunami {
                     lines.push((format!("Tsunami {}: first wave {} after the warning", ts.expect, countdown_text(self.tsunami_time)), 0xC800FF));
                 }
                 lines.push((format!("Sirens: {}", if self.quake_sirens { "on" } else { "off" }), 0xA8B0BC));
@@ -2178,7 +2292,11 @@ impl Orbital {
             if (self.fly - 1.0).abs() > 1e-4 {
                 lines.push((format!("Flying speed: {}", wheel::speed_label(self.fly)), 0x6FC8FF));
             }
-            if self.strike.is_some() {
+            if self.alerting() {
+                lines.push(("False alert: /orbital cancelalert".to_string(), 0xF0C060));
+            } else if self.strike.as_ref().is_some_and(|s| s.key == TS_COUNTDOWN) {
+                lines.push(("Tsunami coming".to_string(), 0xFF8A65));
+            } else if self.strike.is_some() {
                 lines.push(("Strike in progress".to_string(), 0xFF8A65));
             } else {
                 lines.push(("R: laser wheel".to_string(), 0x7C8594));
@@ -2643,12 +2761,64 @@ impl Mod for Orbital {
                 self.save();
                 Ok(Some(format!("Tsunami sirens {v} (the coast's J-Alert poles warn of the Tsunami fired on its own)")))
             }
+            (Some("tsunamiarrival"), v) => {
+                let max = strike::TS_ARRIVAL_MAX;
+                // (seconds, or minutes with an m: 300 or 5m; now, the wave at once as fired)
+                let parsed = v.map(|v| match v {
+                    "now" => Some(0),
+                    v if v.ends_with('m') => v.trim_end_matches('m').parse::<f64>().ok().map(|m| (m * 60.0).round() as u32),
+                    v => v.parse::<u32>().ok(),
+                });
+                let mut c = strike::ts_config();
+                match parsed {
+                    Some(Some(n)) if n == 0 || (10..=max).contains(&n) => {
+                        c.arrival = n;
+                        strike::ts_configure(c);
+                        self.save();
+                        Ok(Some(if n == 0 { "Tsunami arrival: now (the wave at once, as fired)".to_string() } else { format!("Tsunami arrival: the wave {} after its warning (the Tsunami fired on its own)", countdown_text(n)) }))
+                    }
+                    None => Ok(Some(format!("Tsunami arrival: {} (/orbital tsunamiarrival SECONDS, 5m, or now)", if c.arrival == 0 { "now".to_string() } else { countdown_text(c.arrival) }))),
+                    _ => Err(format!("/orbital tsunamiarrival SECONDS (10 to {max}), MINUTES with an m (45m, up to 60m), or now")),
+                }
+            }
+            (Some("quakefalse"), Some(v @ ("on" | "off"))) => {
+                let mut c = strike::qk_false();
+                c.on = v == "on";
+                strike::qk_set_false(c);
+                self.save();
+                Ok(Some(if c.on { format!("False earthquake alert on: the warning goes out, no quake comes, canceled {} after", countdown_text(c.cancel)) } else { "False earthquake alert off: the Earthquake comes as picked".to_string() }))
+            }
+            (Some("quakefalse"), None) => Ok(Some(format!("False earthquake alert: {} (/orbital quakefalse on or off)", if strike::qk_false().on { "on" } else { "off" }))),
+            (Some("quakecancel"), v) => {
+                let (lo, hi) = (strike::QK_CANCELS[0], strike::QK_CANCELS[strike::QK_CANCELS.len() - 1]);
+                let parsed = v.map(|v| if v.ends_with('m') { v.trim_end_matches('m').parse::<f64>().ok().map(|m| (m * 60.0).round() as u32) } else { v.parse::<u32>().ok() });
+                let mut c = strike::qk_false();
+                match parsed {
+                    Some(Some(n)) if (lo..=hi).contains(&n) => {
+                        c.cancel = n;
+                        strike::qk_set_false(c);
+                        self.save();
+                        Ok(Some(format!("False alert: canceled {} after its warning", countdown_text(n))))
+                    }
+                    None => Ok(Some(format!("False alert: canceled {} after its warning (/orbital quakecancel SECONDS or 2m)", countdown_text(c.cancel)))),
+                    _ => Err(format!("/orbital quakecancel SECONDS ({lo} to {hi}) or MINUTES with an m (2m, up to 10m)")),
+                }
+            }
+            (Some("cancelalert"), None) => {
+                if self.cancel_alert() { Ok(Some("Earthquake alert canceled".to_string())) } else { Err("No false earthquake alert under way (/orbital quakefalse on, then fire the Earthquake)".to_string()) }
+            }
+            (Some("alertsirens"), Some(v @ ("on" | "off"))) => {
+                strike::alert_configure(strike::AlertConfig { on: v == "on", ..strike::alert_config() });
+                self.save();
+                Ok(Some(format!("Alert sirens {v} (the J-Alert poles' general alert for every laser but the Earthquake and the Tsunami)")))
+            }
+            (Some("alertsirens"), None) => Ok(Some(format!("Alert sirens: {} (/orbital alertsirens on or off)", if strike::alert_config().on { "on" } else { "off" }))),
             (Some("tsunamisirens"), None) => Ok(Some(format!("Tsunami sirens: {} (/orbital tsunamisirens on or off)", if strike::ts_config().sirens { "on" } else { "off" }))),
             (Some("sirenvolume"), v) => match v.map(str::parse::<u32>) {
                 Some(Ok(n)) if n <= 200 => {
                     self.siren_volume = n;
                     self.save();
-                    Ok(Some(format!("Siren volume: {n}% (the Earthquake's and the Tsunami's sirens and disaster radio; 0 none)")))
+                    Ok(Some(format!("Siren volume: {n}% (every J-Alert siren, alert and disaster radio; 0 none)")))
                 }
                 None => Ok(Some(format!("Siren volume: {}% (/orbital sirenvolume 0 to 200)", self.siren_volume))),
                 _ => Err("/orbital sirenvolume PERCENT (0 to 200)".to_string()),
@@ -2713,7 +2883,7 @@ impl Mod for Orbital {
                 Ok(Some(format!("{} loaded", LASERS[self.laser].title)))
             }
             _ => Err(format!(
-                "/orbital give | wheel | terrain on|off | hud on|off | quality full|fast | impactframes kanada|blackflash|cinematic|off | foldpattern a|b|c | foldstop 0-6 | knockback on|off | gravity on|off | tsunamiheight N|max | tsunamisirens on|off | quakeshaking N|auto | quaketsunami yes|no | quakesirens on|off | carryview turn|still | follow on|off|distance N | seed N|lock|random | payloadsound|nukesound main|alt | flyspeed N|reset | stop | skip SECONDS | approach {} | arrival {} | colour {} | {}",
+                "/orbital give | wheel | terrain on|off | hud on|off | quality full|fast | impactframes kanada|blackflash|cinematic|off | foldpattern a|b|c | foldstop 0-6 | knockback on|off | gravity on|off | tsunamiheight N|max | tsunamisirens on|off | tsunamiarrival N|5m|now | quakeshaking N|auto | quaketsunami yes|no | quakesirens on|off | quakefalse on|off | quakecancel N|2m | cancelalert | alertsirens on|off | carryview turn|still | follow on|off|distance N | seed N|lock|random | payloadsound|nukesound main|alt | flyspeed N|reset | stop | skip SECONDS | approach {} | arrival {} | colour {} | {}",
                 APPROACHES.iter().map(|a| a.key).collect::<Vec<_>>().join("|"),
                 ARRIVALS.iter().map(|a| a.key).collect::<Vec<_>>().join("|"),
                 COLOURS.iter().map(|a| a.key).collect::<Vec<_>>().join("|"),
