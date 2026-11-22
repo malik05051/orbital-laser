@@ -11,7 +11,7 @@
 //! field to type one in. Drawn by the game from the
 //! shapes built here; GUI pixels, from the centre of the screen.
 use crate::lasers::{LASERS, Laser, is_ship};
-use crate::strike::{APPROACHES, ARRIVALS, COLOUR_RGB, COLOURS, Choice, FD_PATTERNS, QK_CUSTOM, QK_TSU_MW, qk_custom_inputs, qk_quake, shindo_class};
+use crate::strike::{APPROACHES, ARRIVALS, COLOUR_RGB, COLOURS, Choice, FD_PATTERNS, QK_CUSTOM, QK_TSU_MW, qk_custom_inputs, qk_false, qk_quake, shindo_class};
 use horizon_mod_sdk::ui::{Draw, Point, Rect};
 use std::f32::consts::{PI, TAU};
 
@@ -50,6 +50,10 @@ const HUD: Rect = Rect { x: R_OUT, y: -R_OUT - 33.0, w: 84.0, h: 12.0 };
 const QUALITY: Rect = Rect { x: HUD.x, y: HUD.y + HUD.h + 2.0, w: HUD.w, h: HUD.h };
 /// Stopping the strike under way: a red button under the quality switch, there only while one is.
 const STOP: Rect = Rect { x: HUD.x, y: QUALITY.y + QUALITY.h + 2.0, w: HUD.w, h: HUD.h };
+/// While a false earthquake alert is under way, the stop button's row halved: STOP, and CANCEL (the alert's
+/// cancellation now).
+const STOP_HALF: Rect = Rect { x: STOP.x, y: STOP.y, w: (STOP.w - 2.0) / 2.0, h: STOP.h };
+const CANCEL: Rect = Rect { x: STOP.x + STOP_HALF.w + 2.0, y: STOP.y, w: STOP_HALF.w, h: STOP.h };
 /// The left column's x: the right's mirror, its rows lined up with the right's.
 const LEFT_X: f32 = -HUD.x - HUD.w;
 /// The seed's rows at the top of the left column: its field (the seed a strike's look comes from: the one held, or
@@ -88,9 +92,16 @@ fn quake_w(k: usize) -> f32 {
 }
 fn quake_button(k: usize) -> Rect {
     let n = QK_CUSTOM + 1;
-    let w = QUAKE_LABEL_W + (0..n).map(quake_w).sum::<f32>() + BTN_GAP * (n - 1) as f32;
+    let w = QUAKE_LABEL_W + (0..n).map(quake_w).sum::<f32>() + BTN_GAP * n as f32 + FALSE_W;
     let x = -w / 2.0 + QUAKE_LABEL_W + (0..k).map(quake_w).sum::<f32>() + BTN_GAP * k as f32;
     Rect { x, y: ROW_Y, w: quake_w(k), h: BTN_H }
+}
+/// The false alert's switch at the end of the presets' row (`strike::qk_false`): the warning goes out for the quake
+/// picked, but none comes.
+const FALSE_W: f32 = 8.0 + 6.0 * 11.0;
+fn false_button() -> Rect {
+    let last = quake_button(QK_CUSTOM);
+    Rect { x: last.x + last.w + BTN_GAP, y: ROW_Y, w: FALSE_W, h: BTN_H }
 }
 /// The custom earthquake's rows under the presets': MAG « ‹ 7.0 › »  DEPTH ‹ 10 km ›  SHINDO ‹ AUTO ›, then SHAKING
 /// ‹ AUTO ›  TSUNAMI NO  ARRIVAL ‹ AUTO ›  SIRENS ON (the last two every Earthquake's). Their pieces left to right:
@@ -107,6 +118,10 @@ enum QkPiece {
 pub const QK_TSUNAMI: u8 = 4;
 pub const QK_ARRIVAL: u8 = 5;
 pub const QK_SIRENS: u8 = 6;
+/// The false alert's switch, and how long after its warning it is called off (shown in SHAKING's place while the false
+/// alert is on: a false alert shakes nothing).
+pub const QK_FALSE: u8 = 7;
+pub const QK_CANCEL: u8 = 8;
 thread_local! {
     /// What lib.rs has the Earthquake's tsunami countdown (seconds, 0 auto) and sirens at, for the wheel to show.
     static QK_EXTRAS: std::cell::Cell<(u32, bool)> = const { std::cell::Cell::new((0, true)) };
@@ -140,11 +155,13 @@ fn qk_row(r: usize) -> Vec<(Rect, QkPiece)> {
         (Value(2), 30.0),
         (Step(2, 1), QK_STEP_W),
     ];
+    // (a false alert's CANCEL IN in the place of the custom one's SHAKING)
+    let (lab, f3) = if qk_false().on { ("CANCEL IN", QK_CANCEL) } else { ("SHAKING", 3) };
     let second = [
-        (Label("SHAKING"), 46.0),
-        (Step(3, -1), QK_STEP_W),
-        (Value(3), 30.0),
-        (Step(3, 1), QK_STEP_W),
+        (Label(lab), 54.0),
+        (Step(f3, -1), QK_STEP_W),
+        (Value(f3), 30.0),
+        (Step(f3, 1), QK_STEP_W),
         (Label(""), 8.0),
         (Label("TSUNAMI"), 44.0),
         (Switch(QK_TSUNAMI), 28.0),
@@ -170,13 +187,17 @@ fn qk_row(r: usize) -> Vec<(Rect, QkPiece)> {
         })
         .collect()
 }
-/// The Tsunami's row: WAVE HEIGHT « ‹ 40 m › »  SIRENS ON (the Tsunami fired on its own: `strike::ts_config`).
+/// The Tsunami's row: WAVE HEIGHT « ‹ 40 m › »  SIRENS ON  ARRIVAL ‹ NOW › (the Tsunami fired on its own:
+/// `strike::ts_config`).
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum TsPiece {
     Label(&'static str),
     Value,
     Step(i8),
     Sirens,
+    /// Its first wave's arrival after the warning: the value, a step earlier or later.
+    ArrValue,
+    ArrStep(i8),
 }
 fn ts_row() -> Vec<(Rect, TsPiece)> {
     use TsPiece::*;
@@ -190,6 +211,11 @@ fn ts_row() -> Vec<(Rect, TsPiece)> {
         (Label(""), 8.0),
         (Label("SIRENS"), 38.0),
         (Sirens, 30.0),
+        (Label(""), 8.0),
+        (Label("ARRIVAL"), 44.0),
+        (ArrStep(-1), QK_STEP_W),
+        (ArrValue, 34.0),
+        (ArrStep(1), QK_STEP_W),
     ];
     let w: f32 = items.iter().map(|i| i.1).sum::<f32>() + BTN_GAP * (items.len() - 1) as f32;
     let mut x = -w / 2.0;
@@ -210,6 +236,11 @@ fn qk_custom_text(field: u8) -> String {
         1 => format!("{:.0} km", c.depth),
         2 => c.shindo.map_or("AUTO".to_string(), |s| shindo_class(s).0.to_string()),
         3 => crate::shaking_text(c.shaking),
+        QK_CANCEL => match qk_false().cancel {
+            s if s < 60 => format!("{s}s"),
+            s if s % 60 == 0 => format!("{}m", s / 60),
+            s => format!("{}m{:02}", s / 60, s % 60),
+        },
         _ => match QK_EXTRAS.with(std::cell::Cell::get).0 {
             0 => "AUTO".to_string(),
             s if s % 60 == 0 => format!("{}m", s / 60),
@@ -270,6 +301,10 @@ pub enum Spot {
     SeedLock,
     /// Stopping the strike under way.
     Stop,
+    /// A false earthquake alert under way: its cancellation now (the stop button's right half while one is).
+    CancelAlert,
+    /// The Tsunami's row: its first wave's arrival after the warning a step earlier or later.
+    TsArrival(i8),
     /// One of the ship's approaches (strike::APPROACHES), or ways of arriving (strike::ARRIVALS).
     Approach(usize),
     Arrival(usize),
@@ -358,6 +393,8 @@ pub struct Wheel {
     bar_hover: Option<f32>,
     /// A strike is under way: the stop button shows.
     pub striking: bool,
+    /// A false earthquake alert is under way: the stop button shares its row with CANCEL.
+    pub alerting: bool,
     /// The laser whose pass is being built as a pick closes the wheel.
     pub loading: Option<usize>,
 }
@@ -507,6 +544,7 @@ pub fn spot(x: f32, y: f32, rows: impl Into<Rows>, page: usize) -> Option<Spot> 
                 match p {
                     TsPiece::Step(d) => return Some(Spot::TsStep(d)),
                     TsPiece::Sirens => return Some(Spot::TsSirens),
+                    TsPiece::ArrStep(d) => return Some(Spot::TsArrival(d)),
                     _ => {}
                 }
             }
@@ -517,6 +555,9 @@ pub fn spot(x: f32, y: f32, rows: impl Into<Rows>, page: usize) -> Option<Spot> 
             if inside(&quake_button(k), x, y) {
                 return Some(Spot::Quake(k));
             }
+        }
+        if inside(&false_button(), x, y) {
+            return Some(Spot::QkStep(QK_FALSE, 1));
         }
         for (r, p) in qk_custom_row() {
             if inside(&r, x, y) {
@@ -555,6 +596,9 @@ pub fn spot(x: f32, y: f32, rows: impl Into<Rows>, page: usize) -> Option<Spot> 
     }
     if inside(&LOCK, x, y) {
         return Some(Spot::SeedLock);
+    }
+    if inside(&CANCEL, x, y) {
+        return Some(Spot::CancelAlert);
     }
     if inside(&STOP, x, y) {
         return Some(Spot::Stop);
@@ -650,6 +694,7 @@ impl Wheel {
     pub fn hover_at(&mut self, x: f32, y: f32, selected: usize) -> bool {
         let now = spot(x, y, self.rows(selected), self.page)
             .or_else(|| toggle_spot(x, y, self.row_for.unwrap_or(selected)))
+            .map(|s| if s == Spot::CancelAlert && !self.alerting { Spot::Stop } else { s })
             .filter(|&s| s != Spot::Stop || self.striking);
         let was = self.row_for;
         match now {
@@ -753,10 +798,18 @@ impl Wheel {
         text(&mut out, if locked { "ON" } else { "OFF" }, LOCK.x + 71.0, LOCK.y + 2.0, if locked { 0xF0C060 } else { 0x7CE884 });
         // stopping the strike under way
         if self.striking {
+            let b = if self.alerting { STOP_HALF } else { STOP };
             let hovered = self.hover == Some(Spot::Stop);
-            out.push(Draw::Fill((STOP, if hovered { 0xF0A02828 } else { 0xE0701C1C })));
-            out.push(Draw::Fill((Rect { x: STOP.x, y: STOP.y + STOP.h - 2.0, w: STOP.w, h: 2.0 }, 0xFFFF6A64)));
-            text(&mut out, "STOP STRIKE", STOP.x + STOP.w / 2.0, STOP.y + STOP.h / 2.0 - 4.0, 0xFFFFFF);
+            out.push(Draw::Fill((b, if hovered { 0xF0A02828 } else { 0xE0701C1C })));
+            out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - 2.0, w: b.w, h: 2.0 }, 0xFFFF6A64)));
+            text(&mut out, if self.alerting { "STOP" } else { "STOP STRIKE" }, b.x + b.w / 2.0, b.y + b.h / 2.0 - 4.0, 0xFFFFFF);
+            // (a false earthquake alert's cancellation, now)
+            if self.alerting {
+                let hovered = self.hover == Some(Spot::CancelAlert);
+                out.push(Draw::Fill((CANCEL, if hovered { 0xF0287A3A } else { 0xE01C5A2A })));
+                out.push(Draw::Fill((Rect { x: CANCEL.x, y: CANCEL.y + CANCEL.h - 2.0, w: CANCEL.w, h: 2.0 }, 0xFF62D46A)));
+                text(&mut out, "CANCEL", CANCEL.x + CANCEL.w / 2.0, CANCEL.y + CANCEL.h / 2.0 - 4.0, 0xFFFFFF);
+            }
         }
         // title, the flying speed, the pages, hint, and what the highlighted laser does
         text(&mut out, "ORBITAL LASER", 0.0, TITLE_Y, 0xFFFFFF);
@@ -844,6 +897,16 @@ impl Wheel {
                         };
                         text(&mut out, glyph, b.x + b.w / 2.0, b.y + 2.0, if hovered { ms.rgb } else { 0xB8BEC8 });
                     }
+                    TsPiece::ArrValue => {
+                        out.push(Draw::Fill((b, 0xE0101318)));
+                        out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - 1.0, w: b.w, h: 1.0 }, argb(0x90, shade(ms.rgb, 0.6)))));
+                        text(&mut out, &crate::strike::ts_arrival_text(c.arrival), b.x + b.w / 2.0, b.y + 2.0, ms.rgb);
+                    }
+                    TsPiece::ArrStep(d) => {
+                        let hovered = self.hover == Some(Spot::TsArrival(d));
+                        out.push(Draw::Fill((b, if hovered { argb(0xE6, shade(ms.rgb, 0.42)) } else { 0xE0181C22 })));
+                        text(&mut out, if d < 0 { "-" } else { "+" }, b.x + b.w / 2.0, b.y + 2.0, if hovered { ms.rgb } else { 0xB8BEC8 });
+                    }
                     TsPiece::Sirens => {
                         let hovered = self.hover == Some(Spot::TsSirens);
                         out.push(Draw::Fill((b, if hovered { 0xF0262A31 } else { 0xD0101318 })));
@@ -869,14 +932,23 @@ impl Wheel {
                 out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - rim, w: b.w, h: rim }, rim_c)));
                 text(&mut out, p.button, b.x + b.w / 2.0, b.y + 2.0, if chosen || hovered { ms.rgb } else { 0x9AA2AE });
             }
+            // (the false alert's switch: lit amber while on)
+            let fa = qk_false().on;
+            let b = false_button();
+            let hovered = self.hover == Some(Spot::QkStep(QK_FALSE, 1));
+            out.push(Draw::Fill((b, if hovered { 0xF0262A31 } else { 0xE0101318 })));
+            out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - if fa { 2.0 } else { 1.0 }, w: b.w, h: if fa { 2.0 } else { 1.0 } }, if fa { 0xFFE8B04A } else { 0x905A6070 })));
+            text(&mut out, "FALSE ALERT", b.x + b.w / 2.0, b.y + 2.0, if fa { 0xF0C060 } else if hovered { 0xB8BEC8 } else { 0x9AA2AE });
             // the custom one's numbers, under them (a step picks CUSTOM too); then the tsunami's countdown and the
             // sirens, every Earthquake's (bright while the one picked has a tsunami, for the countdown)
             let custom = quake == QK_CUSTOM;
-            let has_tsunami = qk_quake(quake).tsunami.is_some();
+            // (a false alert raises no tsunami)
+            let has_tsunami = qk_quake(quake).tsunami.is_some() && !fa;
             for (b, p) in qk_custom_row() {
                 let lit = |f: u8| match f {
                     QK_ARRIVAL => has_tsunami,
-                    QK_SIRENS => true,
+                    QK_SIRENS | QK_CANCEL => true,
+                    QK_TSUNAMI => custom && !fa,
                     _ => custom,
                 };
                 match p {
@@ -884,6 +956,8 @@ impl Wheel {
                         let f = match l {
                             "ARRIVAL" => QK_ARRIVAL,
                             "SIRENS" => QK_SIRENS,
+                            "CANCEL IN" => QK_CANCEL,
+                            "TSUNAMI" => QK_TSUNAMI,
                             _ => 0,
                         };
                         text(&mut out, l, b.x + b.w / 2.0, b.y + 2.0, if lit(f) { 0xB8BEC8 } else { 0x7A808A });
@@ -977,12 +1051,17 @@ impl Wheel {
                     QK_TSUNAMI if qk_custom_inputs().mw < QK_TSU_MW => "A tsunami needs magnitude 6.5 or more".to_string(),
                     QK_TSUNAMI => "A tsunami after it: YES the sea comes, NO none".to_string(),
                     QK_ARRIVAL => "First wave after the warning: AUTO 3-8 min, or 1-15".to_string(),
+                    QK_FALSE if qk_false().on => "False alert on: the warning only, then canceled".to_string(),
+                    QK_FALSE => "A false alert: the warning goes out, no quake comes".to_string(),
+                    QK_CANCEL => "Warning canceled after: 10 s to 10 min".to_string(),
                     _ => "J-Alert siren poles on land: on or off".to_string(),
                 },
                 0x8C93A0,
             ),
             Some(Spot::TsStep(d)) => (format!("Wave height at the coast {} (2 m to 120 m, or MAX)", if d.abs() >= 2 { "by 3 steps" } else { "a step" }), 0x8C93A0),
             Some(Spot::TsSirens) => ("J-Alert siren poles warn of the wave (heard near them)".to_string(), 0x8C93A0),
+            Some(Spot::TsArrival(_)) => ("First wave after the warning: NOW, or 1 to 60 min".to_string(), 0x8C93A0),
+            Some(Spot::CancelAlert) => ("Cancel the false alert now: its cancellation plays".to_string(), 0x8C93A0),
             Some(Spot::Knock) => ("Push on you: thrown by blasts, waves and Shindo 6+ shaking".to_string(), 0x8C93A0),
             Some(Spot::Follow) => ("Camera chases the Nuke's or Payload's bomb down".to_string(), 0x8C93A0),
             Some(Spot::Gravity) => ("After the strike, blocks left hanging fall (terrain on)".to_string(), 0x8C93A0),
@@ -1187,6 +1266,43 @@ mod tests {
         assert_eq!(toggle_spot(GRAV.x + 5.0, GRAV.y + 5.0, ship("nuke")), Some(Spot::Gravity));
         assert_eq!(toggle_spot(KNOCK.x + 5.0, KNOCK.y + 5.0, ship("payload")), Some(Spot::Follow));
         assert_eq!(toggle_spot(FOLLOW.x + 5.0, FOLLOW.y + 5.0, ship("plasma")), None);
+    }
+    #[test]
+    fn the_false_alert_the_tsunamis_arrival_and_the_cancel_button_fit_and_click_through() {
+        let quake = LASERS.iter().position(|l| l.key == "earthquake").unwrap();
+        let tsunami = LASERS.iter().position(|l| l.key == "tsunami").unwrap();
+        // (FALSE ALERT at the end of the presets' row, inside a 1080p window's GUI, clear of the presets)
+        let f = false_button();
+        assert!(f.x >= -240.0 && f.x + f.w <= 240.0 && quake_button(0).x >= -240.0);
+        assert!(f.x >= quake_button(QK_CUSTOM).x + quake_button(QK_CUSTOM).w);
+        assert_eq!(spot(f.x + 4.0, f.y + 4.0, Rows::Quake, page_of(quake)), Some(Spot::QkStep(QK_FALSE, 1)));
+        // (with it on, CANCEL IN takes SHAKING's place)
+        crate::strike::qk_set_false(crate::strike::QkFalse { on: true, cancel: 60 });
+        let rows = qk_custom_row();
+        assert!(rows.iter().any(|(_, p)| *p == QkPiece::Step(QK_CANCEL, 1)) && !rows.iter().any(|(_, p)| *p == QkPiece::Step(3, 1)));
+        assert!(rows.iter().all(|(r, _)| r.x >= -240.0 && r.x + r.w <= 240.0 && r.y + r.h <= 135.0));
+        assert_eq!(qk_custom_text(QK_CANCEL), "1m");
+        crate::strike::qk_set_false(crate::strike::QkFalse { on: false, cancel: 60 });
+        assert!(qk_custom_row().iter().any(|(_, p)| *p == QkPiece::Step(3, 1)));
+        // (the Tsunami's row with ARRIVAL, inside the window too, its steps clickable)
+        let row = ts_row();
+        assert!(row.iter().all(|(r, _)| r.x >= -240.0 && r.x + r.w <= 240.0));
+        for (r, p) in &row {
+            if let TsPiece::ArrStep(d) = p {
+                assert_eq!(spot(r.x + r.w / 2.0, r.y + r.h / 2.0, Rows::Tsunami, page_of(tsunami)), Some(Spot::TsArrival(*d)));
+            }
+        }
+        // (CANCEL: the stop button's right half, only while a false alert is under way)
+        let mut w = Wheel::on_page(page_of(quake), 1.0);
+        w.striking = true;
+        w.hover_at(CANCEL.x + 4.0, CANCEL.y + 4.0, quake);
+        assert_eq!(w.hover, Some(Spot::Stop));
+        w.alerting = true;
+        w.hover_at(CANCEL.x + 4.0, CANCEL.y + 4.0, quake);
+        assert_eq!(w.hover, Some(Spot::CancelAlert));
+        w.hover_at(STOP_HALF.x + 4.0, STOP_HALF.y + 4.0, quake);
+        assert_eq!(w.hover, Some(Spot::Stop));
+        assert!(CANCEL.x + CANCEL.w <= STOP.x + STOP.w + 0.01 && STOP_HALF.x + STOP_HALF.w < CANCEL.x);
     }
     #[test]
     fn pages_turn() {

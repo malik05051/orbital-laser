@@ -4,6 +4,17 @@ What each release of Orbital Laser added, newest first. The current release is i
 
 ## Unreleased
 
+- **Sirens for every laser**: every strike but the Earthquake's and the Tsunami's now sounds the J-Alert's general
+  alert from the poles round you (`/orbital alertsirens on|off`, kept), on the same poles, distances and volume as
+  the Earthquake's sirens. Your own recording can stand for it (`tools/sounds_quake.py --alert-recording`).
+- **A false earthquake alert** (the wheel's FALSE ALERT, `/orbital quakefalse on|off`): the Earthquake Early Warning
+  goes out for the quake picked, but no quake comes; CANCEL IN (`/orbital quakecancel`, 10 s to 10 min) later it is
+  called off, the EEW's cancellation sounding and "Earthquake alert canceled" on the screen. The wheel's CANCEL (beside
+  STOP while one runs) or `/orbital cancelalert` calls it off at once.
+- **The Tsunami's arrival** (the wheel's ARRIVAL on its row, `/orbital tsunamiarrival`): fired on its own its wave can
+  come up to an hour after its warning, with a countdown, NHK's alert tone and the poles' sirens first.
+- **Every tsunami warns with your recordings**: a smaller tsunami (under 3 m) sounded the synthesised siren; every one now
+  sounds the Major Tsunami Warning's siren, and the Tsunami fired on its own NHK's alert tone, as Tohoku does.
 - **Gravity after a strike** (`/orbital gravity on|off`, the wheel's GRAVITY switch, on by default, kept): as a
   gravity mod does (Realistic Block Physics and the like run only on Java editions, which Horizon can't load), once a
   strike with the terrain on is over and its changes are in, the land round its target is read again and whatever it
@@ -19,9 +30,16 @@ What each release of Orbital Laser added, newest first. The current release is i
   its strength; and whether it raises a tsunami (TSUNAMI YES or NO, `/orbital quaketsunami`; YES only from magnitude
   6.5). Next to them, for every Earthquake, ARRIVAL sets its tsunami's first wave after the warning (AUTO 3 to 8
   minutes, or 1 to 15) and SIRENS puts the J-Alert poles and their sounds on or off (`/orbital quakesirens`).
-- **Siren poles stand on land**: they were put a set distance inland of the target whatever was there, so some stood
-  in the sea. Each now goes up on the dry land nearest its place (the world asked where the land is round it), and its
-  sirens are heard from there; the Tsunami's own poles too.
+- **Sirens everywhere on land**: the J-Alert poles were six along the target's coast, so away from it (a village
+  a long way off, say) there were none, though the quake's alerts still sounded on the phone. Now they stand all over
+  the land, one in each 160-block square near the player, put up as they come near it wherever they go (teleported
+  too), each on the dry land nearest the square's middle, none at sea; every siren is heard from the nearest pole that
+  is up. The Tsunami's own sirens too.
+- **The tsunami comes to the coast you are near**: it came to the target, the sea taken to lie beyond it, so fired
+  inland (or with the player gone elsewhere) the sea didn't draw back and the wave came in small from the wrong side.
+  Now, some twenty seconds before the sea draws back, the land round the player is asked where the sea is: the nearest
+  open sea draws back (real water) and the wave comes in from it at its height there (Tohoku's about 15 m at the shore),
+  running up to where the player stands. With no sea near, the target's coast as before.
 - **The Earthquake's land is counted at its real cost**: its chunks' work ran three times what the mod counted, so the
   Tohoku quake's ticks used up to two thirds of the game's limit. Now about a third at most.
 - **The Tsunami's own wave height and sirens** (the wheel's WAVE HEIGHT and SIRENS row under the ring with the Tsunami

@@ -18,11 +18,11 @@ mod rod;
 mod payload;
 mod qk_sea;
 mod quake;
-pub use quake::{QK_CUSTOM, QK_DEPTH, QK_MW, QK_PRESETS, QK_SHAKING, QK_TSU_MW, QkConfig, QkCustom, QkGeo, qk_configure, qk_length, qk_pass_preset, qk_preset, qk_quake, qk_set_custom, shindo_class, qk_custom_inputs, qk_custom_step};
-pub use qk_sea::{QT_AUTO, QT_COUNTDOWN_MAX, auto_countdown as qk_auto_countdown, activate as qk_activate, take_active as qk_take_active, take_pending as qk_take_pending, active_sea as qk_active_sea, on_sea_axis as qk_on_sea_axis, sited as qk_sited};
+pub use quake::{QK_CUSTOM, QK_DEPTH, QK_MW, QK_PRESETS, QK_SHAKING, QK_TSU_MW, QkConfig, QkCustom, QkGeo, qk_configure, qk_length, qk_pass_preset, qk_preset, qk_quake, qk_set_custom, shindo_class, qk_custom_inputs, qk_custom_step, QK_CANCELS, QkFalse, qk_cancel_cmds, qk_cancel_step, qk_false, qk_false_length, qk_set_false};
+pub use qk_sea::{QT_AUTO, QT_COUNTDOWN_MAX, auto_countdown as qk_auto_countdown, activate as qk_activate, take_active as qk_take_active, take_pending as qk_take_pending, active_sea as qk_active_sea, on_sea_axis as qk_on_sea_axis, net_heard as qk_net_heard, alert_config, alert_configure, AlertConfig};
 #[cfg(test)]
 pub(crate) use tsunami::TsConfig;
-pub(crate) use tsunami::{ts_config, ts_configure, ts_height_step, ts_height_text, ts_k_for, ts_scale, ts_set_scale};
+pub(crate) use tsunami::{TS_ARRIVAL_MAX, ts_arrival_step, ts_arrival_text, ts_config, ts_configure, ts_height_step, ts_height_text, ts_k_for, ts_scale, ts_set_scale};
 mod sb_hand;
 mod sb_lift;
 mod sb_lodge;
@@ -100,8 +100,9 @@ pub enum Act {
     Sound { event: String, at: Option<[f64; 3]>, volume: f32, pitch: f32 },
     /// A sound from places out in the world (a siren pole's), worked out as it plays from where the player is then: from
     /// the nearest of `at`, heard only within `reach` of it, its far take (`far`) past `near`; with `here`, played where
-    /// the player is (a recording of a whole coast's sirens), as loud as the nearest place is near.
-    Heard { event: String, far: String, at: Vec<[f64; 3]>, volume: f32, near: f64, reach: f64, here: bool },
+    /// the player is (a recording of a whole coast's sirens), as loud as the nearest place is near. With `net`, its places
+    /// are the J-Alert poles of that group that are up as it plays (`qk_sea::net_heard`), not `at`.
+    Heard { event: String, far: String, at: Vec<[f64; 3]>, volume: f32, near: f64, reach: f64, here: bool, net: Option<u8> },
     /// A jolt of the real camera (`render.shake`): `strength` 0 to 1, fading out over `seconds`.
     Shake { strength: f32, seconds: f32 },
     /// The player knocked back by a blast's front (`world.push-player`, lib.rs's `knockback`): thrown away from `from`
@@ -679,6 +680,23 @@ pub fn bomb_path(key: &str, target: &Target, shader_seed: f32, me: [f64; 3]) -> 
 /// bedrock floor; `shader_seed` is the shader's, for what the two must agree on;
 /// `me` is where the player stands (the meteor storm's sounds reach them late);
 /// `approach` is the way the mothership comes in (APPROACHES).
+/// A false earthquake alert's plan (`quake::quake_false_plan`) for earthquake `preset`: its warning, then its
+/// cancellation; its length `qk_false_length`.
+pub fn false_alert_plan(target: &Target, terrain: bool, shader_seed: f32, me: [f64; 3], preset: usize) -> Vec<(f32, Act)> {
+    quake::quake_false_plan(&crate::lasers::EARTHQUAKE, target, terrain, shader_seed, me, preset)
+}
+/// The Tsunami's countdown to its wave (`tsunami::ts_countdown_plan`): its plan and its length.
+pub fn ts_countdown(target: &Target, terrain: bool, shader_seed: f32, me: [f64; 3]) -> (Vec<(f32, Act)>, f32) {
+    tsunami::ts_countdown_plan(&crate::lasers::TSUNAMI, target, terrain, shader_seed, me)
+}
+/// The J-Alert's general alert for laser `laser`'s strike (`qk_sea::alert_sirens`): its own plan, lib.rs's `fire_at`
+/// adding it to every laser's but the Earthquake's and the Tsunami's, which warn in their own way.
+pub fn alert_plan(laser: &'static Laser, target: &Target, terrain: bool, shader_seed: f32, me: [f64; 3], until: f64) -> Vec<(f32, Act)> {
+    let [bx, by, bz] = target.block;
+    let mut p = Plan { laser, ev: Vec::new(), rng: Rng::new(u64::from(shader_seed.to_bits()) ^ 0xa1e7), bx, by, bz };
+    qk_sea::alert_sirens(&mut p, me, terrain, shader_seed as u32 ^ 0xa1e7, until);
+    p.ev
+}
 pub fn plan(laser: &'static Laser, target: &Target, terrain: bool, dimension: &str, shader_seed: f32, me: [f64; 3], approach: usize) -> Vec<(f32, Act)> {
     if laser.key == "meteor" {
         return meteor_plan(laser, target, terrain, dimension, shader_seed, me);

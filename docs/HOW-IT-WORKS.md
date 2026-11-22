@@ -494,7 +494,7 @@ going in from its middle out as its front reaches them.
 | `/orbital seed N`, `/orbital seed lock`, `/orbital seed random` | every strike's seed (what its random choices come from, so its look) held at N (1 to 997), held at the last strike's, or a fresh one each strike (the default); kept; also the wheel's SEED field (the last strike's seed, or one typed in it) and LOCK SEED switch, at the top of its left column |
 | `/orbital gravity on`, `/orbital gravity off` | gravity after a strike (`strike/gravity.rs`, `Settle`; on by default, kept): with the terrain on, once a strike is over (ended or stopped) and every world change it left waiting is in, plus 2 s, the land within its reach of the target (`gv_reach`: 64 for the beams up to 360 for the Planet Killer, the Tsunami and the Fold; none for the Supervolcano) is read again in tiles of 24 columns (read 8 wider each way, 48 under each top, the tiles nearest the player first, three asked at a time) and what has nothing holding it up falls. Ground and logs (`Mass`) hold if joined face to face to the land under the read, its edge or something left alone; built blocks (`Built`) hold standing on what holds or within their span of it along a layer (glass and wool 3, wood 5, stone 7, iron and obsidian 12; counted along and across); loose things (plants, torches, doors, beds) go with the block under them; what `stays` names never moves. Two rounds of the two passes, over only what stands over a gap in its column (the unbroken ground under it holds without a look), taken in and worked out a piece a tick under the meter. Near the player (112) it falls as falling blocks (`setblock` to air, then summoned with its whole state, up to 480 a strike), the rest is moved straight down in an edit; also the wheel's GRAVITY switch, in its right column under the stop button's row, for every laser but the Supervolcano |
 | `/orbital tsunamiheight BLOCKS`, `/orbital tsunamiheight max` | the Tsunami's own wave (`TsConfig::height`, `ts_k_for`: its `TsGeo::k` set so the gauge at the target reads that height over its ground; max, `k` 1, the default); kept as `tsunamiheight=`; the wheel's TSUNAMI row (`ts_row`: WAVE HEIGHT steps through `TS_HEIGHTS`, 2 to 120, then MAX). An Earthquake's tsunami keeps its own size |
-| `/orbital tsunamisirens on`, `/orbital tsunamisirens off` | the Tsunami fired on its own warned from the coast's J-Alert siren poles (`own_warning` in tsunami.rs: six poles along the coast inland of the target, built as it fires with the terrain on, then `qk_tsunami_extras`' sirens, title and countdown, its warning by the wave's height); on by default; kept as `tsunamisirens=`; the wheel's SIRENS switch. Every pole's sound is an `Act::Heard` (lib.rs's `heard`): from the pole nearest the player as it plays, its `_far` take past `QT_NEAR` (140), none past `QT_HEAR` (400); the coast recording `quake.siren` played where the player is, fainter by the nearest pole's distance |
+| `/orbital tsunamisirens on`, `/orbital tsunamisirens off` | the Tsunami fired on its own warned from the J-Alert siren poles (`own_warning` in tsunami.rs, `net_start`: the network of poles over the land round the player, built as they come near with the terrain on, then `qk_tsunami_extras`' sirens, title and countdown, its warning by the wave's height); on by default; kept as `tsunamisirens=`; the wheel's SIRENS switch. Every pole's sound is an `Act::Heard` (lib.rs's `heard`): from the pole of its group nearest the player as it plays, its `_far` take past `QT_NEAR` (140), none past `QT_HEAR` (400); the coast recording `quake.siren` played where the player is, fainter by the nearest pole's distance |
 | `/orbital knockback on`, `/orbital knockback off` | the Nuke's, the Rod's, the Fold's, the Supervolcano's and the Carpet Bomb's knockback (`Act::Shove`), the Hurricane's carry and the Tsunami's surge on (the default) or off; kept; the camera's jolt stays either way; also the wheel's KNOCKBACK switch, in its left column under LOCK SEED while the Nuke, the Rod or the Hurricane is pointed at or loaded |
 | `/orbital carryview turn`, `/orbital carryview still` | while the Hurricane carries you: `turn` (the default) turns your view a little with you round the storm and sways it with the gusts, `still` leaves it your own; kept |
 | `/orbital follow on`, `/orbital follow off`, `/orbital follow distance N` | the follow camera (`mod/src/follow.rs`), off by default, kept, 70 blocks out by default (10 to 400): an orbit round the Nuke's or the Payload's bomb (`strike::bomb_path`, the path the pass draws it on), the angle the player's own: the camera sits that far back from the bomb along the way they look, so turning the view orbits it. The mod never turns the view or teleports them while it follows: it gives their velocity a kick each tick (`world.push-player`, on the client, as knockback is), worked out against the game's own drag and gravity (or flight's, read from how they move) to land them on the orbit's next point (never more than 24 blocks a tick, past which the game's collision sweep runs out of budget), so the game's own movement and frame interpolation carry them smoothly. It leaves them once the bomb comes within 440 blocks of where they stand (a player only moves where their chunk is loaded, and going further would load and draw new land), flies out to the orbit over 1.6 s, rides the bomb down, backs off to 380 blocks (the Payload 170) as it bursts, orbits the fireball and the climbing cloud, and at 40 s (32 s), a stop or `follow off` puts them back where they stood with a `tp ... ~ ~`; the knockback is left out meanwhile; also the wheel's FOLLOW switch, in its left column while the Nuke or the Payload is pointed at or loaded |
@@ -1310,11 +1310,22 @@ player, the sea's surface `SEA` (62).
   seconds after it (10 to 900, kept; `auto`, the default, a strike's own `QT_AUTO` 180 to 480, `auto_countdown` by its
   seed, worked out in lib.rs's `fire_at` so the plan and its length agree), never sooner than 12 s after the strong shaking; the sea drawing back for the last
   14 to 26 s before it; the quake's strike ending `TS_T` (9 s) before it, as it hands over (`qk_length`).
+- **The coast it comes to** (`relocate`, `find_coast`): 22 s before the sea draws back the land round the player is
+  surveyed (`coast_columns`: every 8 blocks out to 176, the land the game keeps loaded) and the nearest open sea found
+  (a column of water two deep or more at the sea's level whose eight neighbours are too, so not a river or a pond; at
+  least `COAST_OPEN` of them); the way inland from the sea's steps near it to the land's, the shore along that way at
+  the last of the sea. With one, the hand-over is moved there (`HandOff::coast`, `sea`): the Tsunami fires at the shore
+  on the sea's surface and its wave comes in from that sea; the run-up is worked out against it; the pass's wet bed is
+  drawn there (`QK_TAB_COAST`: the shore's x, z and the way inland); and with the terrain on its chunks are kept loaded,
+  their sea surveyed (`coast_sea_columns`, `QT_HALF` along it, `QT_OUT` out), the sea's columns made of it a share a
+  stage (`coast_sea_cols`), and that is the sea that draws back (`coast_flood`, `Flood::moved`: what the quake's own
+  land work then finds at its target is no longer the sea's), if it is in before the sea starts to; if not, or with no
+  open sea near, the target's coast, as fired.
 - **The sea drawing back** (`sea_work`): every chunk the sea reaches is recorded as the quake's work leaves it
-  (`sea_col`), and from the draw-back each is visited about once a second, the sea's water taken out down to where
-  `sea_s` has it (only water taken out). Real water: the seabed bared.
-- **The wave** is the Tsunami strike's own: as the quake ends on its own lib.rs fires the Tsunami at the same target
-  with its size set to the quake's (`wave_k`: its highest wave over the Tsunami's own ~145 at the coast, about 0.08 for
+  (`sea_col`) or as the coast's survey has it, and from the draw-back each is visited about once a second, the sea's
+  water taken out down to where `sea_s` has it (only water taken out). Real water: the seabed bared.
+- **The wave** is the Tsunami strike's own: as the quake ends on its own lib.rs fires the Tsunami at the coast it
+  came to (the quake's target if it wasn't moved) with its size set to the quake's (`wave_k`: its highest wave over the Tsunami's own ~145 at the coast, about 0.08 for
   Tohoku's 12 m; `TsGeo::k`, the pass's `ts_k` through params[10]). Every height of the wave scales by it (its spray and
   rooster tails a little less, `ts_ks`, so a small wave still throws some), its speed, face and reach stay; its sweep of
   the land goes only where it is two blocks deep, so a 12 m wave strips the low land by the coast, not a whole valley.
@@ -1322,15 +1333,18 @@ player, the sea's surface `SEA` (62).
   coast (`sea_restore`, `Act::Cleanup`: also on a stop), the sirens on until the wave has come and gone, `TSUNAMI
   ARRIVING`, and over the hotbar the coast's gauge (the wave's height at the target over its ground, the highest so far).
   A stop or leaving the world before the hand-over drops it, and the quake's own cleanups put the sea back.
-- **The disaster-prevention radio** (`siren_sites`, `site_poles`, `siren_pole_at`, `sirens`, `eew_alert`): six siren
-  poles, four along the coast near the target and two far off along it inland, each moved to the dry land nearest its
-  place (a `world.surface-height` survey round it, 128 blocks every 8, firm ground first; where planned if none, and
-  every sound from a pole heard from where it went up, `sited`) (iron bars and lightning-rod horns, built at the start
-  with the terrain on, left standing; none with `/orbital quakesirens off`; a column with a lightning rod is left alone by the quake and the sea). For a quake with
+- **The disaster-prevention radio** (`net_start`, `net_watch`, `net_heard`, `siren_pole_at`, `sirens`, `eew_alert`):
+  a network of siren poles over all the land, one in each `NET_G` (160) block square: every `NET_EVERY` (1.5 s) the
+  squares whose middle is within `NET_R` (190) of where the player is then are surveyed round their middle (72 blocks,
+  every 8) and each given its pole on the dry land nearest it (firm ground first), none if the square is all sea (asked
+  again if none of it was loaded); up to four a round (iron bars and lightning-rod horns, built with the terrain on,
+  left standing; none with `/orbital quakesirens off`; a column with a lightning rod is left alone by the quake and the
+  sea). The quake's network is kept through its tsunami's hand-over; the Tsunami fired on its own starts its own. For a quake with
   an early warning that day (and every custom one from Mw 6) its alert from them as it starts; for a tsunami, from the
   warning until the wave has gone, broadcasts of a chime, the siren in the JMA's pattern (a Major Tsunami Warning's 3 s
   on and 2 s off six times, a Tsunami Warning's 5 s on and 6 s off four times), a closing chime and a pause. Each pole
-  is its own station: a few seconds out of step with the next, heard late by its distance (343 a second) and fainter
+  sounds from the nearest pole of its group that is up as it plays (`Act::Heard`'s `net`, lib.rs mapping it through
+  `net_heard`; three groups, `NET_GROUPS`, a few seconds out of step), none where no pole is near, fainter
   (each heard out to 16 blocks a unit of volume, 16 at 100%), the far ones muffled and echoing (`_far`). `/orbital
   sirenvolume` (0 to 200 %, kept) scales them. The sounds are synthesised by `tools/sounds_quake.py`: a motor siren's
   blast spinning up, held and spinning down, the opening and closing bell chimes, a two-tone alert, each with a far

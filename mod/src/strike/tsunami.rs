@@ -99,9 +99,31 @@ pub struct TsConfig {
     pub height: Option<u32>,
     pub sirens: bool,
     pub siren: f32,
+    /// Seconds from its warning to its wave reaching the coast (`/orbital tsunamiarrival`, the wheel's ARRIVAL; kept):
+    /// 0 at once, as fired; else a countdown first (`ts_countdown_plan`), up to an hour.
+    pub arrival: u32,
+}
+/// The steps ARRIVAL goes through (seconds; 0 now), and the most it may be set to.
+pub const TS_ARRIVALS: [u32; 12] = [0, 60, 120, 180, 300, 600, 900, 1200, 1800, 2400, 3000, 3600];
+pub const TS_ARRIVAL_MAX: u32 = 3600;
+/// ARRIVAL a step earlier or later.
+pub fn ts_arrival_step(dir: i8) {
+    let mut c = ts_config();
+    let at = TS_ARRIVALS.iter().enumerate().min_by_key(|(_, s)| s.abs_diff(c.arrival)).map_or(0, |x| x.0);
+    c.arrival = TS_ARRIVALS[(at as i64 + i64::from(dir.signum())).clamp(0, TS_ARRIVALS.len() as i64 - 1) as usize];
+    ts_configure(c);
+}
+/// The arrival as the wheel shows it.
+pub fn ts_arrival_text(a: u32) -> String {
+    match a {
+        0 => "NOW".to_string(),
+        a if a % 60 == 0 => format!("{}m", a / 60),
+        a if a >= 60 => format!("{}m{:02}", a / 60, a % 60),
+        a => format!("{a}s"),
+    }
 }
 thread_local! {
-    static CFG: std::cell::Cell<TsConfig> = const { std::cell::Cell::new(TsConfig { height: None, sirens: true, siren: 1.0 }) };
+    static CFG: std::cell::Cell<TsConfig> = const { std::cell::Cell::new(TsConfig { height: None, sirens: true, siren: 1.0, arrival: 0 }) };
 }
 pub fn ts_config() -> TsConfig {
     CFG.with(std::cell::Cell::get)
@@ -131,19 +153,9 @@ pub fn ts_k_for(target: &Target, me: [f64; 3], shader_seed: f32, height: Option<
     let full = (0..900).filter_map(|k| g.level(0.0, 0.0, f64::from(k) * 0.05)).fold(0.0, f64::max);
     if full <= 0.0 { 1.0 } else { (f64::from(h) / full).clamp(0.005, 1.0) }
 }
-/// The Tsunami's own warning from the coast's poles (`TsConfig::sirens`): a hand-over as an Earthquake's tsunami has,
-/// its poles along the coast a little inland of the target, its warning by the wave's height there.
-fn own_warning(geo: &TsGeo, me: [f64; 3], seed: u32, cfg: TsConfig) -> super::qk_sea::HandOff {
-    let mut poles: Vec<[f64; 2]> = [(-120.0, 0.0), (-40.0, 0.0), (40.0, 0.0), (120.0, 0.0), (-300.0, 120.0), (330.0, 160.0)]
-        .iter()
-        .enumerate()
-        .map(|(k, &(u, inland))| {
-            let u = u + (super::mh(k as u32, seed, 0x51e) - 0.5) * 30.0;
-            let d = 26.0 + inland + super::mh(k as u32, seed, 0x51f) * 14.0;
-            [(geo.t[0] + u * geo.n[0] + d * geo.m[0]).floor() + 0.5, (geo.t[2] + u * geo.n[1] + d * geo.m[1]).floor() + 0.5]
-        })
-        .collect();
-    poles.sort_by(|a, b| (a[0] - me[0]).hypot(a[1] - me[2]).total_cmp(&(b[0] - me[0]).hypot(b[1] - me[2])));
+/// The Tsunami's own warning from the J-Alert poles (`TsConfig::sirens`): a hand-over as an Earthquake's tsunami has,
+/// its warning by the wave's height at the target.
+fn own_warning(geo: &TsGeo, seed: u32, cfg: TsConfig) -> super::qk_sea::HandOff {
     let h = (0..900).filter_map(|k| geo.level(0.0, 0.0, f64::from(k) * 0.05)).fold(0.0, f64::max);
     let (kind, color, expect) = if h > 3.0 {
         ("MAJOR TSUNAMI WARNING", 0xC800FF, if h > 10.0 { "10 m+" } else if h > 5.0 { "10 m" } else { "5 m" })
@@ -152,7 +164,43 @@ fn own_warning(geo: &TsGeo, me: [f64; 3], seed: u32, cfg: TsConfig) -> super::qk
     } else {
         ("TSUNAMI ADVISORY", 0xFAF500, "1 m")
     };
-    super::qk_sea::HandOff { flood: None, k: geo.k, kind, color, expect, major: h > 3.0, poles, siren: cfg.siren, seed, sea: (geo.t, geo.m) }
+    super::qk_sea::HandOff { flood: None, k: geo.k, kind, color, expect, major: h > 3.0, siren: if cfg.sirens { cfg.siren } else { 0.0 }, seed, sea: (geo.t, geo.m), coast: None }
+}
+/// The Tsunami fired on its own with an arrival set (`TsConfig::arrival`): its warning first, as an Earthquake's
+/// tsunami has (the JMA's title, NHK's alert tone, over the hotbar the countdown to the wave, the J-Alert poles round
+/// the player sounding with its sirens on), the strike handing over to the Tsunami itself at the target as it ends
+/// (`qk_sea::set_pending`, lib.rs's hand-over), its wave reaching the coast `arrival` seconds after the warning. Its
+/// plan and its length.
+pub(super) fn ts_countdown_plan(laser: &'static Laser, target: &Target, terrain: bool, shader_seed: f32, me: [f64; 3]) -> (Vec<(f32, Act)>, f32) {
+    let cfg = ts_config();
+    let [bx, by, bz] = target.block;
+    let mut p = Plan { laser, ev: Vec::new(), rng: Rng::new(u64::from(shader_seed.to_bits()) ^ 0x75c0), bx, by, bz };
+    let s = shader_seed as u32;
+    let geo = TsGeo::new(target, me, shader_seed);
+    let h = own_warning(&geo, s, cfg);
+    let arrival = f64::from(cfg.arrival.clamp(10, TS_ARRIVAL_MAX));
+    let len = (arrival - TS_T).max(1.0);
+    let major = if h.major { "Major warning" } else if h.kind.starts_with("TSUNAMI WARNING") { "Warning" } else { "Advisory" };
+    p.at(0.0, "title @s times 10 70 20");
+    p.at(0.0, format!(r##"title @s subtitle {{"text":"{major}  ·  {}  ·  get to high ground","color":"#{:06X}"}}"##, h.expect, h.color));
+    p.at(0.0, format!(r##"title @s title {{"text":"TSUNAMI","color":"#{:06X}"}}"##, h.color));
+    p.ev.push((0.0, Act::Sound { event: "orbital:quake.nhk_alert".into(), at: None, volume: 0.9, pitch: 1.0 }));
+    let mut t = 0.0;
+    while t < len {
+        p.ev.push((t as f32, Act::Cmd(format!(r##"title @s actionbar {{"text":"{}  ·  {}  ·  wave in {}","color":"#{:06X}"}}"##, h.kind, h.expect, super::qk_sea::mmss(arrival - t), h.color))));
+        t += 1.0;
+    }
+    if h.siren > 0.0 {
+        super::qk_sea::net_start(terrain, s);
+        let end = len as f32;
+        p.later(0.2, move |q| super::qk_sea::net_watch(q, me, 0.2, end));
+        super::qk_sea::sirens(&mut p, 1.5, len + 0.4, h.major, h.siren, h.seed);
+    } else {
+        super::qk_sea::net_stop();
+    }
+    super::qk_sea::set_pending(h);
+    p.ev.sort_by(|a, b| a.0.total_cmp(&b.0));
+    (p.ev, len as f32)
 }
 impl TsGeo {
     pub fn new(target: &Target, me: [f64; 3], shader_seed: f32) -> TsGeo {
@@ -1124,13 +1172,14 @@ pub(super) fn tsunami_plan(laser: &'static Laser, target: &Target, terrain: bool
     if let Some(h) = super::qk_sea::take_active() {
         super::qk_sea::qk_tsunami_extras(&mut p, &geo, h, me);
     } else if ts_config().sirens && ts_config().siren > 0.0 {
-        // (the Tsunami's own, with its sirens on: the coast's poles put up as it fires, the warning from them)
-        let h = own_warning(&geo, me, s, ts_config());
-        // (on the dry land nearest their places, never in the sea)
-        if terrain {
-            super::qk_sea::site_poles(&mut p, &h.poles, 0.0);
-        }
+        // (the Tsunami's own, with its sirens on: the poles put up on the land round the player as it fires, and as they
+        // go; the warning from them)
+        let h = own_warning(&geo, s, ts_config());
+        super::qk_sea::net_start(terrain, s);
+        p.ev.push((0.0, Act::Sound { event: "orbital:quake.nhk_alert".into(), at: None, volume: 0.9, pitch: 1.0 }));
         super::qk_sea::qk_tsunami_extras(&mut p, &geo, h, me);
+    } else {
+        super::qk_sea::net_stop();
     }
     let len = laser.length;
 
@@ -1277,8 +1326,48 @@ mod tests {
         assert!(rupture == 0.0 && rumble == 1.5 && crash > 9.0 && crash < 11.0 && engulf > 14.0 && under > engulf && drain > under + 8.0);
         // (nothing with the terrain off but the pass's table (a stage), sounds and shakes: no read, no edit, no forceload)
         assert!(plan.iter().all(|(_, a)| !matches!(a, Act::Read { .. } | Act::Blocks(_))));
-        assert_eq!(plan.iter().filter(|(_, a)| matches!(a, Act::Later(_))).count(), 1, "only the table's stage");
+        // (and the sirens' network: where its poles would stand, asked of the world, none built)
+        assert_eq!(plan.iter().filter(|(_, a)| matches!(a, Act::Later(_))).count(), 2, "only the table's stage and the network's");
         assert!(plan.iter().all(|(_, a)| !matches!(a, Act::Cmd(c) if c.contains("forceload"))));
+    }
+    #[test]
+    fn the_tsunami_fired_with_an_arrival_warns_and_counts_down_for_up_to_an_hour_then_hands_over() {
+        let target = Target { block: [0, 64, 0], point: [0.5, 65.0, 0.5] };
+        let me = [0.5, 65.0, 400.0];
+        // (a small one, 2 m: its warning still on the player's Major Tsunami Warning siren)
+        ts_configure(TsConfig { height: Some(2), sirens: true, siren: 1.0, arrival: 3600 });
+        ts_set_scale(ts_k_for(&target, me, 3.0, Some(2)));
+        let (plan, len) = ts_countdown_plan(the_laser(), &target, false, 3.0, me);
+        ts_set_scale(1.0);
+        assert!((f64::from(len) - (3600.0 - TS_T)).abs() < 1e-3, "{len}");
+        let first = plan.iter().find_map(|(_, a)| if let Act::Cmd(c) = a { c.contains("wave in").then(|| c.clone()) } else { None }).unwrap();
+        assert!(first.contains("wave in 60:00"), "{first}");
+        assert!(plan.iter().any(|(_, a)| matches!(a, Act::Sound { event, .. } if event == "orbital:quake.nhk_alert")));
+        let sirens: Vec<&String> = plan.iter().filter_map(|(_, a)| if let Act::Heard { event, .. } = a { Some(event) } else { None }).collect();
+        assert!(sirens.len() > 300 && sirens.iter().all(|e| e.as_str() == "orbital:quake.major" || e.as_str() == "orbital:quake.siren"), "{}", sirens.len());
+        assert!(plan.iter().all(|(t, a)| *t <= len + 6.0 && !matches!(a, Act::Blocks(_) | Act::Read { .. } | Act::Table(_))));
+        // (the hand-over waiting: the Tsunami at the target, its wave at the size set, its sirens on)
+        let h = super::super::qk_sea::take_pending().expect("handed over as it ends");
+        assert!(h.k < 0.05 && h.siren > 0.0 && h.coast.is_none());
+        // sirens off: the countdown, no sirens
+        ts_configure(TsConfig { height: None, sirens: false, siren: 1.0, arrival: 120 });
+        let (plan, len) = ts_countdown_plan(the_laser(), &target, false, 3.0, me);
+        assert!((f64::from(len) - (120.0 - TS_T)).abs() < 1e-3);
+        assert!(plan.iter().all(|(_, a)| !matches!(a, Act::Heard { .. })));
+        assert_eq!(super::super::qk_sea::take_pending().map(|h| h.siren), Some(0.0));
+        // (the steps: now, then minutes up to an hour)
+        ts_configure(TsConfig { height: None, sirens: true, siren: 1.0, arrival: 0 });
+        ts_arrival_step(-1);
+        assert_eq!(ts_config().arrival, 0);
+        ts_arrival_step(1);
+        assert_eq!(ts_config().arrival, 60);
+        for _ in 0..30 {
+            ts_arrival_step(1);
+        }
+        assert_eq!(ts_config().arrival, TS_ARRIVAL_MAX);
+        assert_eq!(ts_arrival_text(0), "NOW");
+        assert_eq!(ts_arrival_text(3600), "60m");
+        ts_configure(TsConfig { height: None, sirens: true, siren: 1.0, arrival: 0 });
     }
     /// A wooded land with a village's block of houses, flat, the grass at the target's ground.
     fn land(x: i32, z: i32, below: u32, above: u32) -> Option<(i32, Vec<&'static str>)> {
@@ -1420,25 +1509,25 @@ mod tests {
         assert_eq!(ts_k_for(&target, me, 3.0, None), 1.0);
         // (its sirens from the poles, heard by where the player is as they play; none with them off)
         let heard = |on: bool| {
-            ts_configure(TsConfig { height: None, sirens: on, siren: 1.0 });
+            ts_configure(TsConfig { height: None, sirens: on, siren: 1.0, arrival: 0 });
             let plan = tsunami_plan(&crate::lasers::TSUNAMI, &target, false, "minecraft:overworld", 3.0, me);
             plan.iter().filter(|(_, a)| matches!(a, Act::Heard { event, .. } if event.contains("quake.major") || event.contains("quake.siren5"))).count()
         };
         assert!(heard(true) >= 6);
         assert_eq!(heard(false), 0);
-        ts_configure(TsConfig { height: None, sirens: true, siren: 1.0 });
+        ts_configure(TsConfig { height: None, sirens: true, siren: 1.0, arrival: 0 });
         // (the steps up and down the heights, MAX past the top)
-        ts_configure(TsConfig { height: Some(10), sirens: true, siren: 1.0 });
+        ts_configure(TsConfig { height: Some(10), sirens: true, siren: 1.0, arrival: 0 });
         ts_height_step(1);
         assert_eq!(ts_config().height, Some(15));
         ts_height_step(-2);
         assert_eq!(ts_config().height, Some(5));
-        ts_configure(TsConfig { height: Some(120), sirens: true, siren: 1.0 });
+        ts_configure(TsConfig { height: Some(120), sirens: true, siren: 1.0, arrival: 0 });
         ts_height_step(1);
         assert_eq!(ts_config().height, None);
         ts_height_step(-1);
         assert_eq!(ts_config().height, Some(120));
-        ts_configure(TsConfig { height: None, sirens: true, siren: 1.0 });
+        ts_configure(TsConfig { height: None, sirens: true, siren: 1.0, arrival: 0 });
     }
 
 }

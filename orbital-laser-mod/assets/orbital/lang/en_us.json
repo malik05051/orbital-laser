@@ -166,5 +166,7 @@
   "subtitles.orbital.quake.siren5": "Coastal siren wails",
   "subtitles.orbital.quake.chime_up": "Disaster radio chimes",
   "subtitles.orbital.quake.chime_down": "Disaster radio chimes",
-  "subtitles.orbital.quake.eew": "Earthquake alert sounds"
+  "subtitles.orbital.quake.eew": "Earthquake alert sounds",
+  "subtitles.orbital.quake.alert": "J-Alert siren sounds",
+  "subtitles.orbital.quake.cancel": "Earthquake alert canceled"
 }

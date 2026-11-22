@@ -463,12 +463,18 @@ laser, command, capability and timing). This file is the short, factual version 
   `/orbital sirenvolume`). The violence over 6+ and 7 (`qk_violence`, the pass's in step), the knockback's shoves
   from 5.8 (`qk_second`); aftershocks (`qk_aftershocks`, `After`) in the pass's table (`qk_table`, `QK_TAB_*`, mod_data)
   with the sea's drawing back, which the pass draws as a wet bed; the hand-over's wave size is set as the quake ends to
-  run up to the player's ground (`run_up_k`, `QT_RUNUP`, a `world.surface-height` survey). Siren poles (`siren_sites`, six, each moved onto the nearest dry land by `site_poles`: a survey round it, the poles
-  built once it answers, every `Act::Heard` from a pole mapped to where it went up through `qk_sited`; none with
-  `/orbital quakesirens off`; `siren_pole_at`: iron bars, lightning-rod horns; a column with a
-  lightning rod is left alone by the quake and the sea) are built at the start with the terrain on; `sirens` and
-  `eew_alert` play the disaster radio from them, each pole its own station (a few seconds' offset, late and fainter by
-  its distance, `_far` muffled past 140), in the JMA's patterns; the sounds by `tools/sounds_quake.py` (`quake.siren3`,
+  run up to the player's ground (`run_up_k`, `QT_RUNUP`, a `world.surface-height` survey). The tsunami comes to the open sea nearest the player 22 s before the sea draws back (`qk_sea::relocate`,
+  `find_coast`, `HandOff::coast`, `QK_TAB_COAST`, the coast's sea surveyed into a `coast_flood`), else the target's.
+  Siren poles are a network over all the land (`net_start`, `net_watch`: one in each 160-block square near the player,
+  wherever they go, on its nearest dry land, none at sea; built with the terrain on; none with `/orbital quakesirens
+  off`; `siren_pole_at`: iron bars, lightning-rod horns; a column with a lightning rod is left alone by the quake and
+  the sea); `sirens` and `eew_alert` play the disaster radio from them (`Act::Heard` with `net`, mapped through
+  `net_heard`: the nearest pole of its group up as it plays, three groups a few seconds apart, `_far` muffled past
+  140). Every other laser's strike adds `strike::alert_plan` (`qk_sea::alert_sirens`, `quake.alert`, `/orbital
+  alertsirens`) in lib.rs's `fire_at`. Two strikes have no pass (`fire_plain`): `FALSE_ALERT` (`quake::quake_false_plan`,
+  `qk_false`, `/orbital quakefalse`, `quakecancel`, `cancelalert` → lib.rs's `cancel_alert`) and `TS_COUNTDOWN`
+  (`tsunami::ts_countdown_plan`, `TsConfig::arrival` up to 3600 s, handing over to the Tsunami through
+  `qk_sea::set_pending` and `tsunami_after`, as the Earthquake does). Every tsunami siren is `quake.major`., in the JMA's patterns; the sounds by `tools/sounds_quake.py` (`quake.siren3`,
   `siren5`, `chime_up`, `chime_down`, `eew`, each with `_far`); `quake.nhk_alert`, `quake.siren` and `quake/eew.ogg` (with `eew_far`, which `build_mod.py`
   puts in for `quake.eew` when present) are the user's own recordings, git-ignored. The pass sways the whole picture by the shaking where the camera is (never a pixel by where it
   is in the world). Keep earthquake.wgsl's `QK_*`, `qk_preset` and `qk_pulse` in step with `QK_PRESETS` and

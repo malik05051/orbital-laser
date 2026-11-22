@@ -3521,5 +3521,41 @@
       }
     ],
     "subtitle": "subtitles.orbital.quake.siren3"
+  },
+  "quake.alert": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/alert",
+        "attenuation_distance": 400
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.alert"
+  },
+  "quake.alert_far": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/alert_far",
+        "attenuation_distance": 400
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.alert"
+  },
+  "quake.cancel": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/cancel",
+        "attenuation_distance": 400
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.cancel"
+  },
+  "quake.cancel_far": {
+    "sounds": [
+      {
+        "name": "orbital:quake/synth/cancel_far",
+        "attenuation_distance": 400
+      }
+    ],
+    "subtitle": "subtitles.orbital.quake.cancel"
   }
 }

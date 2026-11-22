@@ -15,6 +15,8 @@ Writes Ogg Vorbis (mono, 48 kHz) into orbital-sounds/assets/orbital/sounds/quake
     python3 tools/sounds_quake.py
     python3 tools/sounds_quake.py --eew-recording PATH   # also your own EEW chime, as quake/eew.ogg and eew_far.ogg
     python3 tools/sounds_quake.py --major-recording PATH # your own Major Tsunami Warning siren, quake/major.ogg
+    python3 tools/sounds_quake.py --alert-recording PATH # your own J-Alert general alert, quake/alert.ogg
+    python3 tools/sounds_quake.py --cancel-recording PATH # your own EEW cancellation, quake/cancel.ogg
 
 `--eew-recording` (and `--major-recording`, a recording of a pole's Major Tsunami Warning siren) takes a recording of the Earthquake Early Warning's chime (someone else's: git-ignored, never
 published) and writes it beside the others' recordings with its far version; tools/build_mod.py then plays it for
@@ -129,8 +131,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--eew-recording", help="your own recording of the EEW chime (kept out of the repository)")
     ap.add_argument("--major-recording", help="your own recording of a Major Tsunami Warning siren (kept out too)")
+    ap.add_argument("--alert-recording", help="your own recording of a J-Alert general alert, the poles' sound for every other laser (kept out too)")
+    ap.add_argument("--cancel-recording", help="your own recording of the EEW's cancellation, for a false alert (kept out too)")
     args = ap.parse_args()
-    for path, name in [(args.eew_recording, "eew"), (args.major_recording, "major")]:
+    recs = [(args.eew_recording, "eew"), (args.major_recording, "major"), (args.alert_recording, "alert"), (args.cancel_recording, "cancel")]
+    for path, name in recs:
         if not path:
             continue
         x = load(path)
@@ -142,7 +147,7 @@ def main():
         rec = OUT.parent
         write(name, x, rec)
         write(f"{name}_far", far(x), rec)
-    if args.eew_recording or args.major_recording:
+    if any(path for path, _ in recs):
         return
     sounds = {
         "siren3": siren(3.0),
@@ -151,6 +156,9 @@ def main():
         "chime_up": chime([349.2, 440.0, 523.3, 698.5]),
         "chime_down": chime([698.5, 523.3, 440.0, 349.2]),
         "eew": eew(),
+        # (the stand-ins for the general alert and the EEW's cancellation where no recording is put in)
+        "alert": siren(3.0),
+        "cancel": chime([698.5, 523.3, 440.0, 349.2]),
     }
     for name, x in sounds.items():
         write(name, x)

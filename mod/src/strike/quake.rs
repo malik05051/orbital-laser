@@ -391,6 +391,7 @@ fn chance(x: i32, z: i32, seed: u32, k: u32) -> f64 {
 }
 
 /// Where the fault lies, and the shaking anywhere.
+#[derive(Clone)]
 pub struct QkGeo {
     pub q: &'static Quake,
     pub preset: usize,
@@ -583,7 +584,7 @@ fn classify(name: &str) -> Pal {
     } else if matches!(n, "water" | "lava" | "bubble_column" | "seagrass" | "tall_seagrass" | "kelp" | "kelp_plant") {
         1
     } else if super::hurricane::stays(plain) || n.ends_with("lightning_rod") {
-        // (and lightning rods: the J-Alert siren poles' horns and crowns, qk_sea::siren_pole, stand through it all)
+        // (and lightning rods: the J-Alert siren poles' horns and crowns, qk_sea::siren_pole_at, stand through it all)
         8
     } else {
         hu_block(plain).map_or(8, |b| HU_BLOCKS[b as usize].class)
@@ -1575,7 +1576,7 @@ fn qk_second(q: &mut Plan, geo: Rc<QkGeo>, t0: f32, me0: [f64; 3], sea: Option<q
 /// The sounds where the player stands: the Earthquake Early Warning's chime (`quake.eew`) as a phone and a television
 /// sound it, the P waves' rumble, each subevent's roar through the ground, the creak of timber while it shakes hard;
 /// the rupture's cracks along the trace where it breaks; each aftershock's rumble, the strong ones warned of again.
-fn qk_sounds(p: &mut Plan, geo: &QkGeo, me: [f64; 3], afters: &[After], poles: &[[f64; 2]], siren: f32) {
+fn qk_sounds(p: &mut Plan, geo: &QkGeo, me: [f64; 3], afters: &[After], siren: f32) {
     let quake = geo.q;
     let (u, d) = geo.ud(me[0], me[2]);
     let ii = geo.ii_ud(u, d);
@@ -1599,7 +1600,7 @@ fn qk_sounds(p: &mut Plan, geo: &QkGeo, me: [f64; 3], afters: &[After], poles: &
         if quake.eew && ia >= 4.5 {
             p.ev.push(((a.t + 0.6) as f32, Act::Sound { event: "orbital:quake.eew".into(), at: None, volume: 0.85, pitch: 1.0 }));
             if ia >= 5.0 {
-                qk_sea::eew_alert(p, poles, geo.t[1], me, a.t + 0.8, siren, geo.seed ^ (a.t as u32));
+                qk_sea::eew_alert(p, a.t + 0.8, siren, geo.seed ^ (a.t as u32));
             }
         }
         p.ev.push(((a.t + pw) as f32, Act::Sound { event: "orbital:sinkhole.rumble".into(), at: None, volume: 0.4 * l, pitch }));
@@ -1664,7 +1665,7 @@ fn qk_sounds(p: &mut Plan, geo: &QkGeo, me: [f64; 3], afters: &[After], poles: &
 /// recording, git-ignored: none without it), no chime before it, the coast's sirens from the poles (`qk_sea::sirens`), the
 /// sea's hiss as it withdraws.
 #[allow(clippy::too_many_arguments)]
-fn qk_sea_warnings(p: &mut Plan, geo: &QkGeo, tsu: &qk_sea::Tsu, st: &qk_sea::SeaTime, me: [f64; 3], poles: &[[f64; 2]], cfg: &QkConfig) {
+fn qk_sea_warnings(p: &mut Plan, geo: &QkGeo, tsu: &qk_sea::Tsu, st: &qk_sea::SeaTime, me: [f64; 3], cfg: &QkConfig) {
     let (kind, col) = qk_sea::warning(tsu);
     let title = |p: &mut Plan, t: f64, head: &str, sub: &str, rgb: u32| {
         let t = t as f32;
@@ -1678,7 +1679,7 @@ fn qk_sea_warnings(p: &mut Plan, geo: &QkGeo, tsu: &qk_sea::Tsu, st: &qk_sea::Se
     let alert = |p: &mut Plan, t: f64, vol: f32| p.ev.push((t as f32, Act::Sound { event: "orbital:quake.nhk_alert".into(), at: None, volume: vol, pitch: 1.0 }));
     alert(p, st.warn, 0.9);
     let major = kind.starts_with("MAJOR");
-    qk_sea::sirens(p, poles, geo.t[1], me, st.warn + 1.5, st.end + 0.4, major, cfg.siren, geo.seed);
+    qk_sea::sirens(p, st.warn + 1.5, st.end + 0.4, major, cfg.siren, geo.seed);
     let (_, d) = geo.ud(me[0], me[2]);
     let near = (1.0 - d.max(0.0) / (1.5 * tsu.reach)).clamp(0.15, 1.0) as f32;
     p.ev.push((st.draw as f32, Act::Sound { event: "orbital:tsunami.rumble_after".into(), at: None, volume: 0.35 * near, pitch: 0.8 }));
@@ -1692,12 +1693,15 @@ pub const QK_TAB_SEA: usize = 52;
 /// How much longer the quake's subevents run than those of the preset the pass draws it as (`qk_pass_preset`: a custom
 /// one shaking as long as set; 1 for a preset).
 pub const QK_TAB_TIME: usize = 58;
+/// Where the sea draws back, if the tsunami was moved to the coast the player is near (`qk_sea::relocate`): the shore's
+/// x and z and the way inland (0, 0: the target's coast).
+pub const QK_TAB_COAST: usize = 59;
 /// Seconds from the first subevent's start to the end of the last that shakes (its aftershock-like tail left out).
 fn qk_span(q: &Quake) -> f32 {
     q.pulses.iter().filter(|p| p.1 > 0.2 + 1e-6 || p.1 < 0.2 - 1e-6).map(|p| p.0 + p.2).fold(1.0, f32::max)
 }
 fn qk_table(q: &Quake, preset: usize, afters: &[After], sea: Option<qk_sea::SeaTime>) -> Vec<u32> {
-    let mut w = vec![0f32; QK_TAB_TIME + 1];
+    let mut w = vec![0f32; QK_TAB_COAST + 4];
     w[QK_TAB_TIME] = if preset < QK_CUSTOM { 1.0 } else { qk_span(q) / qk_span(&QK_PRESETS[qk_pass_preset(preset)]) };
     let n = afters.len().min(QK_AFTER_MAX);
     w[QK_TAB_AFTER] = n as f32;
@@ -1711,6 +1715,87 @@ fn qk_table(q: &Quake, preset: usize, afters: &[After], sea: Option<qk_sea::SeaT
         w[QK_TAB_SEA..QK_TAB_SEA + 6].copy_from_slice(&[st.draw as f32, st.arrive as f32, ts.draw as f32, ts.speed as f32, st.end as f32, qk_sea::SEA as f32]);
     }
     w.iter().map(|f| f.to_bits()).collect()
+}
+
+/// A false earthquake alert (`/orbital quakefalse`, the wheel's FALSE ALERT; kept): the Earthquake Early Warning goes
+/// out for the quake picked, but no quake comes, and `cancel` seconds after it the warning is called off
+/// (`/orbital quakecancel`, the wheel's CANCEL IN: 10 s to 10 min), or at once (`/orbital cancelalert`, the wheel's
+/// CANCEL while it is under way).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct QkFalse {
+    pub on: bool,
+    pub cancel: u32,
+}
+/// The steps CANCEL IN goes through, seconds.
+pub const QK_CANCELS: [u32; 13] = [10, 20, 30, 45, 60, 90, 120, 180, 240, 300, 360, 480, 600];
+thread_local! {
+    static FALSE: std::cell::Cell<QkFalse> = const { std::cell::Cell::new(QkFalse { on: false, cancel: 60 }) };
+}
+pub fn qk_false() -> QkFalse {
+    FALSE.with(std::cell::Cell::get)
+}
+pub fn qk_set_false(c: QkFalse) {
+    FALSE.with(|f| f.set(QkFalse { on: c.on, cancel: c.cancel.clamp(QK_CANCELS[0], QK_CANCELS[QK_CANCELS.len() - 1]) }));
+}
+/// CANCEL IN a step earlier or later.
+pub fn qk_cancel_step(dir: i8) {
+    let mut c = qk_false();
+    let at = QK_CANCELS.iter().enumerate().min_by_key(|(_, s)| s.abs_diff(c.cancel)).map_or(0, |x| x.0);
+    c.cancel = QK_CANCELS[(at as i64 + i64::from(dir.signum())).clamp(0, QK_CANCELS.len() as i64 - 1) as usize];
+    qk_set_false(c);
+}
+
+/// The false alert's plan for earthquake `preset` (`qk_false`): no shaking, no land changed, no tsunami; the Earthquake
+/// Early Warning as the real one goes out (the phone's and the television's chime where the player is, the J-Alert
+/// poles' alert round them, `qk_sea::eew_alert`, and over the hotbar the warning with the Shindo forecast where they
+/// stand), then `cancel` seconds on its cancellation: `quake.cancel` (the player's recording where they put one in),
+/// "Earthquake alert canceled" on the screen (a title short enough to fit the smallest window, the words under it).
+/// The strike's length is `qk_false_length`.
+pub(super) fn quake_false_plan(laser: &'static Laser, target: &Target, terrain: bool, shader_seed: f32, me: [f64; 3], preset: usize) -> Vec<(f32, Act)> {
+    let cfg = config();
+    let f = qk_false();
+    let [bx, by, bz] = target.block;
+    let mut p = Plan { laser, ev: Vec::new(), rng: Rng::new(u64::from(shader_seed.to_bits()) ^ 0xfa15e), bx, by, bz };
+    let geo = QkGeo::new(preset, target, me, shader_seed);
+    let (u, d) = geo.ud(me[0], me[2]);
+    // (a warning is for strong shaking: Shindo 5- at the least, more where the quake picked would bring it)
+    let (cls, _, _) = shindo_class(geo.ii_ud(u, d).max(4.5));
+    let t0 = f64::from(QK_T0);
+    let until = t0 + 1.0 + f64::from(f.cancel);
+    if cfg.siren > 0.0 {
+        qk_sea::net_start(terrain, geo.seed);
+        let end = (until + 8.0) as f32;
+        p.later(0.2, move |q| qk_sea::net_watch(q, me, 0.2, end));
+    } else {
+        qk_sea::net_stop();
+    }
+    p.ev.push(((t0 + 1.0) as f32, Act::Sound { event: "orbital:quake.eew".into(), at: None, volume: 0.85, pitch: 1.0 }));
+    qk_sea::eew_alert(&mut p, t0 + 1.2, cfg.siren, geo.seed);
+    let mut t = t0 + 1.0;
+    while t < until {
+        p.ev.push((t as f32, Act::Cmd(format!(r##"title @s actionbar {{"text":"EARTHQUAKE EARLY WARNING  ·  SHINDO {cls}","color":"#FF2800"}}"##))));
+        t += 1.0;
+    }
+    for c in qk_cancel_cmds() {
+        p.ev.push((until as f32, Act::Cmd(c)));
+    }
+    p.ev.push((until as f32, Act::Sound { event: "orbital:quake.cancel".into(), at: None, volume: 0.9, pitch: 1.0 }));
+    p.ev.sort_by(|a, b| a.0.total_cmp(&b.0));
+    p.ev
+}
+/// How long the false alert's strike runs: its warning, its cancellation and a few seconds after.
+pub fn qk_false_length() -> f32 {
+    QK_T0 + 1.0 + qk_false().cancel as f32 + 8.0
+}
+/// The commands that say the alert is called off: a title of a word (a title is drawn four times the size: "CANCELED"
+/// fits a 320-wide window), "Earthquake alert canceled" under it and over the hotbar.
+pub fn qk_cancel_cmds() -> Vec<String> {
+    vec![
+        "title @s times 5 80 20".to_string(),
+        r##"title @s subtitle {"text":"Earthquake alert canceled","color":"#7CE884"}"##.to_string(),
+        r##"title @s title {"text":"CANCELED","color":"#7CE884"}"##.to_string(),
+        r##"title @s actionbar {"text":"EARTHQUAKE ALERT CANCELED","color":"#7CE884"}"##.to_string(),
+    ]
 }
 
 /// What the player has set for the next Earthquake (lib.rs's `fire_at`, through `qk_configure`): the tsunami's
@@ -1966,21 +2051,24 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
         p.soon(t0, move |q| qk_second(q, g, t0, me, sea, a, terrain));
         t += 1.0;
     }
-    let poles = qk_sea::siren_sites(&geo, me);
-    qk_sounds(&mut p, &geo, me, &afters, &poles, cfg.siren);
+    qk_sounds(&mut p, &geo, me, &afters, cfg.siren);
     // what the pass reads: the aftershocks (its sway) and the sea drawing back (its wet bed)
-    p.ev.push((0.0, Act::Table(qk_table(quake, preset, &afters, sea))));
-    // the coast's siren poles (built with the terrain on; heard either way), its earthquake alert from them as the warning
-    // goes out, and with a tsunami its warnings and sirens
-    // (none with its sirens off; on the dry land nearest their places, never in the sea)
-    if cfg.siren > 0.0 && terrain {
-        qk_sea::site_poles(&mut p, &poles, 0.2);
+    let table = qk_table(quake, preset, &afters, sea);
+    p.ev.push((0.0, Act::Table(table.clone())));
+    // the J-Alert poles: one on every stretch of land round the player, wherever they go (built with the terrain on;
+    // heard either way), its earthquake alert from them as the warning goes out, and with a tsunami its warnings and
+    // sirens (none with its sirens off)
+    if cfg.siren > 0.0 {
+        qk_sea::net_start(terrain, geo.seed);
+        p.later(0.2, move |q| qk_sea::net_watch(q, me, 0.2, len));
+    } else {
+        qk_sea::net_stop();
     }
     if quake.eew {
-        qk_sea::eew_alert(&mut p, &poles, geo.t[1], me, f64::from(QK_T0) + 1.2, cfg.siren, geo.seed);
+        qk_sea::eew_alert(&mut p, f64::from(QK_T0) + 1.2, cfg.siren, geo.seed);
     }
     if let (Some(tsu), Some(st)) = (quake.tsunami.as_ref(), sea) {
-        qk_sea_warnings(&mut p, &geo, tsu, &st, me, &poles, &cfg);
+        qk_sea_warnings(&mut p, &geo, tsu, &st, me, &cfg);
     }
     let mut flood_out = None;
 
@@ -2044,11 +2132,16 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
             flood_out = Some(f);
         }
     }
+    // the tsunami comes to the coast the player is near as the sea is about to draw back, if there is open sea near them
+    if let Some(st) = sea {
+        let at = (st.draw - 22.0).max(1.0) as f32;
+        qk_sea::relocate(&mut p, geo.clone(), st, me, at, flood_out.clone(), table, len);
+    }
     // the hand-over to the Tsunami (lib.rs fires it at the same target as this strike ends on its own)
     if let Some(tsu) = quake.tsunami.as_ref() {
         let (kind, color) = qk_sea::warning(tsu);
         let k0 = qk_sea::wave_k(tsu);
-        qk_sea::set_pending(qk_sea::HandOff { flood: flood_out, k: k0, kind, color, expect: tsu.expect, major: kind.starts_with("MAJOR"), poles, siren: cfg.siren, seed: geo.seed, sea: (geo.t, geo.nm) });
+        qk_sea::set_pending(qk_sea::HandOff { flood: flood_out, k: k0, kind, color, expect: tsu.expect, major: kind.starts_with("MAJOR"), siren: cfg.siren, seed: geo.seed, sea: (geo.t, geo.nm), coast: None });
         // the run-up: a tsunami runs on inland and up the land well over its height at the coast (Tohoku's 10 to 15
         // m ran up to 40), so the wave is made as big as it takes to reach the ground where the player stands as it
         // comes, up to `QT_RUNUP` times its own; higher ground than that is safe, as it is in life
@@ -2058,13 +2151,16 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
             let [x, _, z] = crate::sdk::game::get_player().map_or(me, |p| [p.x, p.y, p.z]);
             q.ev.push((t_ask, Act::Survey { tag, columns: vec![(x.floor() as i32, z.floor() as i32)] }));
         });
-        let (block, point, gt, nm) = (target.block, target.point, geo.t, geo.nm);
+        let (block, point) = (target.block, target.point);
         p.later((len - 1.0).max(0.3), move |_| {
             let now = crate::sdk::game::get_player().map_or(me, |p| [p.x, p.y, p.z]);
             let ground = crate::ground::at(now[0].floor() as i32, now[2].floor() as i32).map_or(now[1].floor(), f64::from);
-            let ts = super::tsunami::TsGeo::new(&Target { block, point }, qk_sea::on_sea_axis(gt, nm, now), 0.0);
-            let k = qk_sea::run_up_k(&ts, ground, k0);
-            qk_sea::with_pending(|h| h.k = k);
+            // (at the coast the wave comes to: the player's, if one was found near them)
+            qk_sea::with_pending(|h| {
+                let ((block, point), (gt, nm)) = (h.coast.unwrap_or((block, point)), h.sea);
+                let ts = super::tsunami::TsGeo::new(&Target { block, point }, qk_sea::on_sea_axis(gt, nm, now), 0.0);
+                h.k = qk_sea::run_up_k(&ts, ground, k0);
+            });
         });
     }
     // (what would come after its end left out: the far player's last aftershock; but not what a stop must still do)
@@ -2076,6 +2172,41 @@ pub(super) fn quake_plan(laser: &'static Laser, target: &Target, terrain: bool, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_false_alert_warns_then_is_canceled_and_shakes_nothing() {
+        let target = Target { block: [0, 64, 0], point: [0.5, 65.0, 0.5] };
+        qk_set_false(QkFalse { on: true, cancel: 90 });
+        qk_configure(QkConfig { countdown: 60.0, siren: 1.0 });
+        let plan = quake_false_plan(&crate::lasers::EARTHQUAKE, &target, true, 7.0, [0.5, 66.0, 120.5], 0);
+        let until = QK_T0 + 1.0 + 90.0;
+        assert!((qk_false_length() - (until + 8.0)).abs() < 1e-4);
+        // (the warning: the phone's chime, the poles', the hotbar's every second until it is called off)
+        let sound_at = |name: &str| plan.iter().find_map(|(t, a)| matches!(a, Act::Sound { event, .. } if event == name).then_some(*t));
+        assert_eq!(sound_at("orbital:quake.eew"), Some(QK_T0 + 1.0));
+        assert_eq!(sound_at("orbital:quake.cancel"), Some(until));
+        assert!(plan.iter().any(|(_, a)| matches!(a, Act::Heard { event, .. } if event == "orbital:quake.eew")));
+        let warns = plan.iter().filter(|(_, a)| matches!(a, Act::Cmd(c) if c.contains("EARTHQUAKE EARLY WARNING"))).count();
+        assert!((89..=91).contains(&warns), "{warns}");
+        // nothing shakes, nothing changes, no tsunami: no camera jolt, no blocks, no pass's table, no forceload
+        assert!(plan.iter().all(|(_, a)| !matches!(a, Act::Shake { .. } | Act::Shove { .. } | Act::Blocks(_) | Act::Table(_) | Act::Read { .. })));
+        assert!(plan.iter().all(|(_, a)| !matches!(a, Act::Cmd(c) if c.contains("forceload"))));
+        // its cancellation's words fit the smallest window (320 wide: a title's letters 24 px, a subtitle's 12)
+        let cmds: Vec<String> = plan.iter().filter(|(t, _)| *t == until).filter_map(|(_, a)| if let Act::Cmd(c) = a { Some(c.clone()) } else { None }).collect();
+        let text = |kind: &str| cmds.iter().find(|c| c.starts_with(&format!("title @s {kind} "))).and_then(|c| c.split("\"text\":\"").nth(1)).map(|t| t.split('"').next().unwrap().to_string()).unwrap();
+        assert_eq!(text("subtitle"), "Earthquake alert canceled");
+        assert!(text("title").len() * 24 <= 320 && text("subtitle").len() * 12 <= 320, "{cmds:?}");
+        assert!(text("actionbar").len() * 6 <= 320);
+        // (CANCEL IN's steps, kept to 10 s to 10 min)
+        qk_set_false(QkFalse { on: true, cancel: 600 });
+        qk_cancel_step(1);
+        assert_eq!(qk_false().cancel, 600);
+        qk_set_false(QkFalse { on: true, cancel: 5000 });
+        assert_eq!(qk_false().cancel, 600);
+        qk_cancel_step(-1);
+        assert_eq!(qk_false().cancel, 480);
+        qk_set_false(QkFalse { on: false, cancel: 60 });
+    }
 
     fn geo(preset: usize) -> QkGeo {
         let target = Target { block: [0, 64, 0], point: [0.5, 65.0, 0.5] };

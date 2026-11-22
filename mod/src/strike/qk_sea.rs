@@ -165,11 +165,14 @@ pub struct Flood {
     pub next: usize,
     pub washed: u32,
     pub peak: i32,
+    /// Moved to the coast the player is near (`coast_flood`): what the quake's land work finds at its own target is
+    /// no longer the sea's.
+    pub moved: bool,
 }
 
 impl Flood {
     pub fn new(geo: Rc<QkGeo>, st: SeaTime) -> Flood {
-        Flood { geo, st, chunks: Vec::new(), next: 0, washed: 0, peak: 0 }
+        Flood { geo, st, chunks: Vec::new(), next: 0, washed: 0, peak: 0, moved: false }
     }
     fn ts(&self) -> &'static Tsu {
         self.geo.q.tsunami.as_ref().expect("a tsunami")
@@ -180,6 +183,9 @@ impl Flood {
     }
     /// A chunk as the quake left it: kept if the sea can reach any of it.
     pub fn add(&mut self, cx: i32, cz: i32, cols: Box<[FCol; 256]>) {
+        if self.moved {
+            return;
+        }
         let ts = self.ts();
         let mut any = false;
         for (i, c) in cols.iter().enumerate() {
@@ -367,43 +373,247 @@ pub fn warning(ts: &Tsu) -> (&'static str, u32) {
     }
 }
 
-/// Where the coast's J-Alert siren poles stand (x, z): four along it a little inland of the target's line, two far off
-/// along it, the one nearest the player first.
-pub fn siren_sites(geo: &QkGeo, me: [f64; 3]) -> Vec<[f64; 2]> {
-    // (four along the coast near the target, and two more a long way off along it, inland: the next towns')
-    let mut out: Vec<[f64; 2]> = [(-120.0, 0.0), (-40.0, 0.0), (40.0, 0.0), (120.0, 0.0), (-300.0, 120.0), (330.0, 160.0)]
-        .iter()
-        .enumerate()
-        .map(|(k, &(u, inland))| {
-            let u = u + (super::mh(k as u32, geo.seed, 0x51e) - 0.5) * 30.0;
-            let d = 26.0 + inland + super::mh(k as u32, geo.seed, 0x51f) * 14.0;
-            [(geo.t[0] + u * geo.st[0] + d * geo.nm[0]).floor() + 0.5, (geo.t[2] + u * geo.st[1] + d * geo.nm[1]).floor() + 0.5]
-        })
-        .collect();
-    out.sort_by(|a, b| (a[0] - me[0]).hypot(a[1] - me[2]).total_cmp(&(b[0] - me[0]).hypot(b[1] - me[2])));
-    out
+/// The coast the tsunami comes to, worked out from strike second `at` (some twenty seconds before the sea draws back
+/// at `st.draw`): the land round the player asked where the sea is (`find_coast`); with open sea near them, the
+/// Tsunami's hand-over moved there (its coast, the way its wave comes in), the pass's drawn-back sea with it
+/// (`table`, its `QK_TAB_COAST` set), and with the terrain on (`flood`) the sea's work too: the chunks there kept
+/// loaded until `len`, their sea asked about, and the sea that draws back made of it, if it is in before the sea
+/// starts to (if not, the target's as it was).
+#[allow(clippy::too_many_arguments)]
+pub fn relocate(p: &mut Plan, geo: Rc<QkGeo>, st: SeaTime, me0: [f64; 3], at: f32, flood: Option<Rc<RefCell<Flood>>>, table: Vec<u32>, len: f32) {
+    p.later(at, move |q| {
+        let me = crate::sdk::game::get_player().map_or(me0, |p| [p.x, p.y, p.z]);
+        let tag = crate::ground::new_tag();
+        let columns = coast_columns(me);
+        crate::meter::spend(30 * columns.len() as u64);
+        q.ev.push((at, Act::Survey { tag, columns }));
+        coast_stage(q, geo, st, me, tag, at + 0.2, at + 4.0, flood, table, len);
+    });
+}
+#[allow(clippy::too_many_arguments)]
+fn coast_stage(q: &mut Plan, geo: Rc<QkGeo>, st: SeaTime, me: [f64; 3], tag: u32, at: f32, until: f32, flood: Option<Rc<RefCell<Flood>>>, table: Vec<u32>, len: f32) {
+    if !crate::ground::ready(tag) {
+        if at < until {
+            q.later(at + 0.2, move |q| coast_stage(q, geo, st, me, tag, at + 0.2, until, flood, table, len));
+        } else {
+            crate::sdk::log::write(crate::sdk::log::Level::Info, "earthquake: the land round the player didn't answer; its tsunami comes to the target's coast");
+        }
+        return;
+    }
+    let Some((t, nm)) = find_coast(me) else {
+        crate::sdk::log::write(crate::sdk::log::Level::Info, "earthquake: no open sea near the player; its tsunami comes to the target's coast");
+        return;
+    };
+    crate::sdk::log::write(crate::sdk::log::Level::Info, &format!("earthquake: its tsunami comes to the coast at {:.0} {:.0}, inland towards {:.2} {:.2}", t[0], t[2], nm[0], nm[1]));
+    let (bx, bz) = (t[0].floor() as i32, t[2].floor() as i32);
+    with_pending(|h| {
+        h.sea = (t, nm);
+        h.coast = Some(([bx, SEA, bz], [t[0], f64::from(SEA + 1), t[2]]));
+    });
+    let mut table = table;
+    let i = super::quake::QK_TAB_COAST;
+    if table.len() < i + 4 {
+        table.resize(i + 4, 0);
+    }
+    for (k, v) in [t[0], t[2], nm[0], nm[1]].iter().enumerate() {
+        table[i + k] = (*v as f32).to_bits();
+    }
+    q.ev.push((at, Act::Table(table)));
+    let Some(flood) = flood else { return };
+    // (the chunks the sea's work reaches there kept loaded, their sea asked about once they are)
+    let columns = coast_sea_columns(t, nm);
+    let (mut x0, mut z0, mut x1, mut z1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for &(x, z) in &columns {
+        (x0, z0, x1, z1) = (x0.min(x), z0.min(z), x1.max(x), z1.max(z));
+    }
+    if columns.is_empty() {
+        return;
+    }
+    q.ev.push((at, Act::Cmd(format!("forceload add {x0} {z0} {x1} {z1}"))));
+    q.ev.push(((len - 1.0).max(at + 1.0), Act::Spare(format!("forceload remove {x0} {z0} {x1} {z1}"))));
+    let ask = at + 2.5;
+    q.later(ask, move |q| {
+        let tag = crate::ground::new_tag();
+        q.ev.push((ask, Act::Survey { tag, columns: columns.clone() }));
+        sea_stage(q, geo, st, t, nm, tag, columns, ask + 0.2, flood);
+    });
+}
+#[allow(clippy::too_many_arguments)]
+fn sea_stage(q: &mut Plan, geo: Rc<QkGeo>, st: SeaTime, t: [f64; 3], nm: [f64; 2], tag: u32, columns: Vec<(i32, i32)>, at: f32, flood: Rc<RefCell<Flood>>) {
+    let until = (st.draw - 1.0) as f32;
+    if !crate::ground::ready(tag) {
+        if at < until {
+            q.later(at + 0.2, move |q| sea_stage(q, geo, st, t, nm, tag, columns, at + 0.2, flood));
+        } else {
+            crate::sdk::log::write(crate::sdk::log::Level::Info, "earthquake: the coast's sea didn't answer in time; the target's draws back");
+        }
+        return;
+    }
+    build_stage(q, geo, st, t, nm, Rc::new(columns), 0, SeaChunks::new(), at, flood);
+}
+/// The coast's sea made of the survey's answer a share of its columns a stage (the meter's), and set as the sea's work
+/// once it is all in, if before the sea starts to draw back.
+#[allow(clippy::too_many_arguments)]
+fn build_stage(q: &mut Plan, geo: Rc<QkGeo>, st: SeaTime, t: [f64; 3], nm: [f64; 2], columns: Rc<Vec<(i32, i32)>>, from: usize, mut out: SeaChunks, at: f32, flood: Rc<RefCell<Flood>>) {
+    let mut i = from;
+    while i < columns.len() && crate::meter::spent() < 6_000_000 {
+        let j = (i + 2_000).min(columns.len());
+        coast_sea_cols(&mut out, &columns[i..j]);
+        i = j;
+    }
+    if i < columns.len() {
+        if f64::from(at) < st.draw - 0.6 {
+            q.later(at + 0.05, move |q| build_stage(q, geo, st, t, nm, columns, i, out, at + 0.05, flood));
+        }
+        return;
+    }
+    let f = coast_flood(&geo, st, t, nm, out);
+    crate::sdk::log::write(crate::sdk::log::Level::Info, &format!("earthquake: the sea draws back from {} chunks of that coast", f.chunks.len()));
+    *flood.borrow_mut() = f;
 }
 
-thread_local! {
-    /// Where each siren pole planned at (x, z) went up, on dry land: (x, z, its ground). What is heard from its
-    /// planned place is heard from there (lib.rs's `Act::Heard`, through `sited`), the Tsunami's after the quake too.
-    static SITED: RefCell<Vec<([f64; 2], [f64; 3])>> = const { RefCell::new(Vec::new()) };
-}
-/// How far round its planned place a pole looks for dry land (blocks), the step it looks in, and how long (strike
-/// seconds) the poles wait for the world's answer before they go up where planned.
-const SITE_R: i32 = 128;
+// ---- the sirens: a J-Alert pole on every stretch of land -------------------------------------------------------------
+/// Japan's towns all have their disaster-prevention radio's poles, not just its coast. So it is here: the land is cut
+/// into squares `NET_G` blocks across, and each square near the player has its pole, put up as they come near it
+/// (wherever they have gone, teleported or flown) on the dry land nearest the square's middle; a square that is all sea
+/// has none. What the poles broadcast is heard from the nearest that is up (`net_heard`), so there are sirens
+/// wherever there is land, and none at sea.
+pub const NET_G: i32 = 160;
+/// Squares whose middle is within this of the player get their pole (the game keeps 12 chunks round them loaded).
+const NET_R: f64 = 190.0;
+/// How far round its square's middle a pole looks for dry land, and the step it looks in.
+const NET_LOOK: i32 = 72;
 const SITE_STEP: i32 = 8;
-const SITE_WAIT: f32 = 3.0;
-/// The places round a pole's planned one it may go, nearest first.
-fn site_offsets() -> Vec<(i32, i32)> {
-    let n = SITE_R / SITE_STEP;
-    let mut v: Vec<(i32, i32)> = (-n..=n).flat_map(|i| (-n..=n).map(move |j| (i * SITE_STEP, j * SITE_STEP))).filter(|&(a, b)| a * a + b * b <= SITE_R * SITE_R).collect();
+/// How often the network looks where the player is (strike seconds), how many of its rounds a square asked about waits
+/// for the world's answer before it is asked again, and how many poles go up a round at most.
+const NET_EVERY: f32 = 1.5;
+const NET_WAIT: u32 = 4;
+const NET_BUILD: usize = 4;
+/// The poles' station groups: each group sets its broadcast off on its own (`sirens`), so near one pole it wails while
+/// the next answers from further off. `NET_ALL`: every pole.
+pub const NET_GROUPS: u8 = 3;
+pub const NET_ALL: u8 = u8::MAX;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Square {
+    /// The world asked where its land is (`round`: the network's round it was asked in).
+    Asked { tag: u32, round: u32 },
+    /// Its pole, (x, its ground, z).
+    Pole([f64; 3]),
+    Sea,
+}
+#[derive(Default)]
+struct Net {
+    on: bool,
+    /// Whether its poles are built as blocks (the terrain on); off, they are only where their sounds come from.
+    build: bool,
+    seed: u32,
+    round: u32,
+    squares: std::collections::HashMap<(i32, i32), Square>,
+}
+thread_local! {
+    static NET: RefCell<Net> = RefCell::new(Net::default());
+}
+/// A new network for a strike that sounds sirens (the Earthquake's, the Tsunami's own); its poles built as blocks if
+/// `build`. The Tsunami an Earthquake hands over to keeps the quake's.
+pub fn net_start(build: bool, seed: u32) {
+    NET.with(|n| *n.borrow_mut() = Net { on: true, build, seed, ..Net::default() });
+}
+/// No sirens: none heard (a strike with its sirens off).
+pub fn net_stop() {
+    NET.with(|n| *n.borrow_mut() = Net::default());
+}
+/// Square (i, j)'s middle, a little off its true middle (each square its own).
+fn square_mid(i: i32, j: i32, seed: u32) -> (i32, i32) {
+    let h = (i as u32).wrapping_mul(73_856_093) ^ (j as u32).wrapping_mul(19_349_663);
+    let off = |k: u32| ((super::mh(h, seed, k) - 0.5) * 48.0) as i32;
+    (i * NET_G + NET_G / 2 + off(0x5e1), j * NET_G + NET_G / 2 + off(0x5e2))
+}
+fn square_group(i: i32, j: i32) -> u8 {
+    ((i.rem_euclid(3) + 2 * j.rem_euclid(3)) % i32::from(NET_GROUPS)) as u8
+}
+/// The places round a square's middle its pole may go, nearest first.
+fn look_offsets() -> Vec<(i32, i32)> {
+    let n = NET_LOOK / SITE_STEP;
+    let mut v: Vec<(i32, i32)> = (-n..=n).flat_map(|i| (-n..=n).map(move |j| (i * SITE_STEP, j * SITE_STEP))).filter(|&(a, b)| a * a + b * b <= NET_LOOK * NET_LOOK).collect();
     v.sort_by_key(|&(a, b)| (a * a + b * b, a, b));
     v
 }
-/// Where a sound planned at `p` (a pole's horns, `[x, y + 9, z]`) is heard from: its pole's place on the land.
-pub fn sited(p: [f64; 3]) -> [f64; 3] {
-    SITED.with(|s| s.borrow().iter().find(|(k, _)| (k[0] - p[0]).abs() < 0.01 && (k[1] - p[2]).abs() < 0.01).map_or(p, |&(_, [x, z, g])| [x, g + 9.0, z]))
+/// Where the network's poles of `group` (`NET_ALL`: all of them) sound from: their horns, nine up.
+pub fn net_heard(group: u8) -> Vec<[f64; 3]> {
+    NET.with(|n| {
+        let n = n.borrow();
+        n.squares
+            .iter()
+            .filter(|&(&(i, j), _)| group == NET_ALL || square_group(i, j) == group)
+            .filter_map(|(_, s)| match *s {
+                Square::Pole([x, g, z]) => Some([x, g + 9.0, z]),
+                _ => None,
+            })
+            .collect()
+    })
+}
+/// One round of the network from strike second `at`: the squares round the player (where they are now; `me0` where
+/// nothing says) asked about, those answered given their pole (or none, all sea), and again every `NET_EVERY` until
+/// `until`.
+pub fn net_watch(q: &mut Plan, me0: [f64; 3], at: f32, until: f32) {
+    let me = crate::sdk::game::get_player().map_or(me0, |p| [p.x, p.y, p.z]);
+    let on = NET.with(|n| {
+        let mut n = n.borrow_mut();
+        if !n.on {
+            return false;
+        }
+        n.round += 1;
+        let (round, seed, build) = (n.round, n.seed, n.build);
+        let offs = look_offsets();
+        let (ci, cj) = ((me[0] / f64::from(NET_G)).floor() as i32, (me[2] / f64::from(NET_G)).floor() as i32);
+        let mut up = 0;
+        for i in ci - 2..=ci + 2 {
+            for j in cj - 2..=cj + 2 {
+                crate::meter::spend(400);
+                let (mx, mz) = square_mid(i, j, seed);
+                if (f64::from(mx) + 0.5 - me[0]).hypot(f64::from(mz) + 0.5 - me[2]) > NET_R {
+                    continue;
+                }
+                match n.squares.get(&(i, j)).copied() {
+                    None => {
+                        let tag = crate::ground::new_tag();
+                        let columns: Vec<(i32, i32)> = offs.iter().map(|&(a, b)| (mx + a, mz + b)).collect();
+                        crate::meter::spend(30 * columns.len() as u64);
+                        q.ev.push((at, Act::Survey { tag, columns }));
+                        n.squares.insert((i, j), Square::Asked { tag, round });
+                    }
+                    Some(Square::Asked { tag, .. }) if crate::ground::ready(tag) && up < NET_BUILD => {
+                        up += 1;
+                        match dry_spot(mx, mz, &offs) {
+                            Some((x, z, g)) => {
+                                n.squares.insert((i, j), Square::Pole([f64::from(x) + 0.5, f64::from(g), f64::from(z) + 0.5]));
+                                if build {
+                                    q.ev.push((at + 0.05 * up as f32, Act::Blocks(Box::new(siren_pole_at(x, z, Some(g))))));
+                                }
+                            }
+                            // (all of it sea: no pole; none of it loaded: asked again when the player is nearer)
+                            None if offs.iter().any(|&(a, b)| crate::ground::at(mx + a, mz + b).is_some()) => {
+                                n.squares.insert((i, j), Square::Sea);
+                            }
+                            None => {
+                                n.squares.remove(&(i, j));
+                            }
+                        }
+                    }
+                    // (the answer lost, a new strike's survey having cleared it: asked again)
+                    Some(Square::Asked { round: r, .. }) if round.saturating_sub(r) > NET_WAIT => {
+                        n.squares.remove(&(i, j));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        true
+    });
+    if on && at + NET_EVERY < until {
+        q.later(at + NET_EVERY, move |q| net_watch(q, me0, at + NET_EVERY, until));
+    }
 }
 /// The dry land nearest (x0, z0) among `offs` round it, as the survey has it: firm ground (dry the steps round it too)
 /// if there is some, else any dry column; (x, z, its ground).
@@ -417,46 +627,138 @@ fn dry_spot(x0: i32, z0: i32, offs: &[(i32, i32)]) -> Option<(i32, i32, i32)> {
     let &(a, b) = firm.or_else(|| offs.iter().find(|&&(a, b)| dry(x0 + a, z0 + b).is_some()))?;
     Some((x0 + a, z0 + b, dry(x0 + a, z0 + b)?))
 }
-/// The coast's siren poles planned at `poles` put up from strike second `at`, each on the dry land nearest its place
-/// (none in the sea): the world asked where the land is round them, the poles going up once it answers (where planned
-/// if no land is near or the answer is slow); their sounds heard from there. With the terrain on only: off, no poles go
-/// up and their sounds come from their planned places.
-pub fn site_poles(p: &mut Plan, poles: &[[f64; 2]], at: f32) {
-    SITED.with(|s| s.borrow_mut().clear());
-    let tag = crate::ground::new_tag();
-    let offs = site_offsets();
-    let columns: Vec<(i32, i32)> = poles.iter().flat_map(|&[x, z]| offs.iter().map(move |&(a, b)| (x.floor() as i32 + a, z.floor() as i32 + b))).collect();
-    crate::meter::spend(30 * columns.len() as u64);
-    p.ev.push((at, Act::Survey { tag, columns }));
-    let poles = poles.to_vec();
-    p.later(at + 0.1, move |q| pole_stage(q, poles, tag, at + 0.1, at + SITE_WAIT));
+
+// ---- where the sea is: the tsunami comes to the coast the player is near -----------------------------------------------
+/// A tsunami raised by a great quake reaches every coast for hundreds of kilometres, so it comes where the player is:
+/// as the sea is about to draw back, the land round them is asked where the sea is, and the nearest open sea (not a
+/// river or a pond) is the sea that draws back and the wave comes in from. None near them: the target's coast, as fired.
+/// How far round the player it looks (the land the game keeps loaded), and the step.
+const COAST_R: i32 = 176;
+const COAST_STEP: i32 = 8;
+/// How many of the steps must be open sea for it to be a sea.
+const COAST_OPEN: usize = 6;
+/// The columns asked about round the player at `me`.
+pub fn coast_columns(me: [f64; 3]) -> Vec<(i32, i32)> {
+    let (px, pz) = (me[0].floor() as i32, me[2].floor() as i32);
+    let n = COAST_R / COAST_STEP;
+    (-n..=n).flat_map(|a| (-n..=n).map(move |b| (a, b))).filter(|&(a, b)| a * a + b * b <= n * n).map(|(a, b)| (px + a * COAST_STEP, pz + b * COAST_STEP)).collect()
 }
-fn pole_stage(q: &mut Plan, poles: Vec<[f64; 2]>, tag: u32, at: f32, until: f32) {
-    if !crate::ground::ready(tag) && at < until {
-        q.later(at + 0.2, move |q| pole_stage(q, poles, tag, at + 0.2, until));
-        return;
-    }
-    let offs = site_offsets();
-    for (k, &[px, pz]) in poles.iter().enumerate() {
-        let (x0, z0) = (px.floor() as i32, pz.floor() as i32);
-        let t = at + 0.05 * k as f32;
-        match dry_spot(x0, z0, &offs) {
-            Some((x, z, g)) => {
-                SITED.with(|s| s.borrow_mut().push(([px, pz], [f64::from(x) + 0.5, f64::from(z) + 0.5, f64::from(g)])));
-                q.ev.push((t, Act::Blocks(Box::new(siren_pole_at(x, z, Some(g))))));
+/// Whether column (x, z) is the sea's (water two deep or more, its top at the sea's level), as the survey has it; none
+/// where it said nothing.
+fn sea_at(x: i32, z: i32) -> Option<bool> {
+    crate::meter::spend(300);
+    let g = crate::ground::at(x, z)?;
+    Some(crate::ground::water(x, z).is_some_and(|w| w >= 2 && (SEA - 3..=SEA + 1).contains(&(g + w - 1))))
+}
+/// The coast nearest `me` as the survey of `coast_columns(me)` has it: the shore between the open sea nearest them and
+/// the land (its x, the sea's surface over it, z) and the way inland from it. None if no open sea is near.
+pub fn find_coast(me: [f64; 3]) -> Option<([f64; 3], [f64; 2])> {
+    let (px, pz) = (me[0].floor() as i32, me[2].floor() as i32);
+    let n = COAST_R / COAST_STEP;
+    let s = |a: i32, b: i32| if a * a + b * b <= n * n { sea_at(px + a * COAST_STEP, pz + b * COAST_STEP) } else { None };
+    let mut open = Vec::new();
+    for a in -n..=n {
+        for b in -n..=n {
+            if s(a, b) == Some(true) && (-1..=1).all(|i| (-1..=1).all(|j| s(a + i, b + j) == Some(true))) {
+                open.push((a * a + b * b, a, b));
             }
-            None => q.ev.push((t, Act::Blocks(Box::new(siren_pole(x0, z0))))),
         }
     }
+    if open.len() < COAST_OPEN {
+        return None;
+    }
+    let &(_, oa, ob) = open.iter().min()?;
+    // (the way inland: from the sea's steps near it to the land's)
+    let (mut sea, mut land, mut ns, mut nl) = ([0.0f64; 2], [0.0f64; 2], 0.0, 0.0);
+    for a in oa - 8..=oa + 8 {
+        for b in ob - 8..=ob + 8 {
+            match s(a, b) {
+                Some(true) => {
+                    sea[0] += f64::from(a);
+                    sea[1] += f64::from(b);
+                    ns += 1.0;
+                }
+                Some(false) => {
+                    land[0] += f64::from(a);
+                    land[1] += f64::from(b);
+                    nl += 1.0;
+                }
+                None => {}
+            }
+        }
+    }
+    let norm = |v: [f64; 2]| {
+        let l = v[0].hypot(v[1]);
+        (l > 1e-6).then(|| [v[0] / l, v[1] / l])
+    };
+    let towards_me = norm([-f64::from(oa), -f64::from(ob)]).unwrap_or([0.0, 1.0]);
+    let nm = if ns > 0.0 && nl > 0.0 { norm([land[0] / nl - sea[0] / ns, land[1] / nl - sea[1] / ns]).unwrap_or(towards_me) } else { towards_me };
+    // (the shore: from the open sea along the way inland to the last of the sea)
+    let (ox, oz) = (f64::from(px + oa * COAST_STEP), f64::from(pz + ob * COAST_STEP));
+    let mut last = (ox, oz);
+    for k in 1..=2 * n {
+        let (x, z) = (ox + nm[0] * f64::from(k * COAST_STEP), oz + nm[1] * f64::from(k * COAST_STEP));
+        let (a, b) = (((x - f64::from(px)) / f64::from(COAST_STEP)).round() as i32, ((z - f64::from(pz)) / f64::from(COAST_STEP)).round() as i32);
+        match s(a, b) {
+            Some(true) => last = (x, z),
+            Some(false) => {
+                last = (0.5 * (last.0 + x), 0.5 * (last.1 + z));
+                break;
+            }
+            None => break,
+        }
+    }
+    Some(([last.0.floor() + 0.5, f64::from(SEA + 1), last.1.floor() + 0.5], nm))
+}
+/// The sea's columns along the coast at `t` (inland `nm`) that the sea's work reaches (`QT_HALF` each side, `QT_OUT` out to
+/// sea and a little inland), the world to be asked about.
+pub fn coast_sea_columns(t: [f64; 3], nm: [f64; 2]) -> Vec<(i32, i32)> {
+    let st = [nm[1], -nm[0]];
+    let r = (QT_HALF.hypot(QT_OUT) + 2.0).ceil() as i32;
+    let (cx, cz) = (t[0].floor() as i32, t[2].floor() as i32);
+    let mut out = Vec::new();
+    crate::meter::spend(10 * (2 * r as u64 + 1).pow(2));
+    for x in cx - r..=cx + r {
+        for z in cz - r..=cz + r {
+            let (dx, dz) = (f64::from(x) + 0.5 - t[0], f64::from(z) + 0.5 - t[2]);
+            let (u, d) = (dx * st[0] + dz * st[1], dx * nm[0] + dz * nm[1]);
+            if u.abs() <= QT_HALF && (-QT_OUT..=24.0).contains(&d) {
+                out.push((x, z));
+            }
+        }
+    }
+    crate::meter::spend(20 * out.len() as u64);
+    out
+}
+/// The sea's columns found among `columns` (from the survey of `coast_sea_columns`), put in the chunks they are in.
+pub type SeaChunks = std::collections::BTreeMap<(i32, i32), Box<[FCol; 256]>>;
+pub fn coast_sea_cols(out: &mut SeaChunks, columns: &[(i32, i32)]) {
+    for &(x, z) in columns {
+        crate::meter::spend(450);
+        let (Some(gr), Some(w)) = (crate::ground::at(x, z), crate::ground::water(x, z)) else { continue };
+        let top = gr + w - 1;
+        if w < 2 || !(SEA - 3..=SEA + 1).contains(&top) {
+            continue;
+        }
+        let (base, orig) = ((gr - 1) as i16, top as i16);
+        let cols = out.entry((x.div_euclid(16), z.div_euclid(16))).or_insert_with(|| Box::new([FCol::default(); 256]));
+        cols[(z.rem_euclid(16) * 16 + x.rem_euclid(16)) as usize] = FCol { kind: Kind::Sea, base, orig, cur: orig, hi: orig, top: orig, house: 0, washed: false };
+    }
+}
+/// The sea's work at the coast found (`find_coast`): its chunks with the sea in them, their sea's columns (the land left
+/// alone: before the wave it does not change), in the coast's own axes.
+pub fn coast_flood(geo: &QkGeo, st: SeaTime, t: [f64; 3], nm: [f64; 2], chunks: SeaChunks) -> Flood {
+    let mut g = QkGeo { t, st: [nm[1], -nm[0]], nm, ..geo.clone() };
+    g.t[1] = f64::from(SEA + 1);
+    let mut f = Flood::new(Rc::new(g), st);
+    f.moved = true;
+    f.chunks = chunks.into_iter().map(|((cx, cz), cols)| FChunk { cx, cz, cols, reached: false }).collect();
+    f
 }
 
-/// A J-Alert siren pole at (x, z), as real blocks on its ground: a grey metal post (iron bars, which the quake's damage
-/// leaves standing) eleven high, loudspeaker horns facing out
-/// four ways near its top and two more under them, a lightning rod on its crown.
-pub fn siren_pole(x: i32, z: i32) -> Blocks {
-    siren_pole_at(x, z, None)
-}
-/// As `siren_pole`, standing on `ground` (the first air over the land) if given, else on each column's own top.
+/// A J-Alert siren pole at (x, z), as real blocks standing on `ground` (the first air over the land; none: on each
+/// column's own top): a grey metal post (iron bars, which the quake's damage leaves standing) eleven high, loudspeaker
+/// horns facing out four ways near its top and two more under them, a lightning rod on its crown.
 pub fn siren_pole_at(x: i32, z: i32, ground: Option<i32>) -> Blocks {
     let mut b = Blocks { clear_of_player: true, ..Default::default() };
     let (g, surface) = ground.map_or((0, true), |g| (g, false));
@@ -487,12 +789,14 @@ pub struct HandOff {
     pub color: u32,
     pub expect: &'static str,
     pub major: bool,
-    pub poles: Vec<[f64; 2]>,
     pub siren: f32,
     pub seed: u32,
     /// The coast's middle and the way inland from it (the sea the other way): the wave comes from the side the sea drew
     /// back from, wherever the player has gone since (`on_sea_axis`).
     pub sea: ([f64; 3], [f64; 2]),
+    /// Where the Tsunami is fired (its block and point): the coast the player was near as the sea drew back
+    /// (`relocate`), none the quake's own target.
+    pub coast: Option<([i32; 3], [f64; 3])>,
 }
 thread_local! {
     static PENDING: RefCell<Option<HandOff>> = const { RefCell::new(None) };
@@ -557,28 +861,28 @@ pub const QT_CYCLE: f64 = 31.0;
 pub const QT_HEAR: f64 = 400.0;
 pub const QT_NEAR: f64 = 140.0;
 
-/// The coast's disaster-prevention radio, from its poles, as a town's sounds in life: no chime, the siren twice in the
-/// JMA's pattern (a Major Tsunami Warning's 3 s on and 2 s off: `quake.major`, two blasts, twice; a Tsunami Warning's
-/// 5 s on and 6 s off: `siren5`, twice), then the pause its announcement is spoken in, and again every `QT_CYCLE`,
-/// from `from` to `until`. Every pole is its own station: started some seconds apart from the next (each town's
-/// set off on its own), heard late by its distance (at 343 a second) and fainter, the far ones muffled and echoing
-/// (`_far`), so near the coast one wails while others answer from further off. `vol` the player's siren volume (1 as
-/// made); none at all at 0.
-#[allow(clippy::too_many_arguments)]
-pub fn sirens(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], from: f64, until: f64, major: bool, vol: f32, seed: u32) {
+/// The disaster-prevention radio, from the network's poles (`net_watch`), as a town's sounds in life: no chime, the
+/// siren twice in the JMA's pattern (a Major Tsunami Warning's 3 s on and 2 s off: `quake.major`, two blasts, twice; a
+/// Tsunami Warning's 5 s on and 6 s off: `siren5`, twice), then the pause its announcement is spoken in, and again every
+/// `QT_CYCLE`, from `from` to `until`. Each of the poles' groups is set off on its own, some seconds apart, each heard
+/// from its nearest pole that is up, fainter the further off and past `QT_NEAR` muffled and echoing (`_far`), so near
+/// one pole it wails while the next answers from further off; none where no pole is near. `vol` the player's siren
+/// volume (1 as made); none at all at 0.
+pub fn sirens(p: &mut Plan, from: f64, until: f64, major: bool, vol: f32, seed: u32) {
     if vol <= 0.0 {
         return;
     }
-    let (blast, every) = if major { ("major", 10.0) } else { ("siren5", 11.0) };
-    for (k, &[x, z]) in poles.iter().enumerate() {
-        let d = (x - me[0]).hypot(z - me[2]);
-        let late = super::mh(k as u32, seed, 0x5a1) * 8.0 + d / 343.0;
-        let at = vec![[x, y + 9.0, z]];
-        let v = QT_POLE_VOL * vol;
+    // (every tsunami's warning on the Major Tsunami Warning's siren, the player's recording where they put one in: a
+    // smaller one's synthesised `siren5` is no longer played)
+    let _ = major;
+    let (blast, every) = ("major", 10.0);
+    let v = QT_POLE_VOL * vol;
+    for g in 0..NET_GROUPS {
+        let late = super::mh(u32::from(g), seed, 0x5a1) * 8.0 + 3.0 * f64::from(g);
         let push = |p: &mut Plan, t: f64, ev: &str| {
             if t >= from && t < until + 6.0 {
                 let event = format!("orbital:quake.{ev}");
-                p.ev.push((t as f32, Act::Heard { far: format!("{event}_far"), event, at: at.clone(), volume: v, near: QT_NEAR, reach: QT_HEAR, here: false }));
+                p.ev.push((t as f32, Act::Heard { far: format!("{event}_far"), event, at: Vec::new(), volume: v, near: QT_NEAR, reach: QT_HEAR, here: false, net: Some(g) }));
             }
         };
         let mut c = from + late;
@@ -590,25 +894,63 @@ pub fn sirens(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], from: f64,
     }
     // (and further off still, past the poles: the player's own recording of a coast's sirens, if they put one in, faint,
     // and only within the poles' reach, fainter the further off the nearest is)
-    let all: Vec<[f64; 3]> = poles.iter().map(|&[x, z]| [x, y + 9.0, z]).collect();
     let mut t = from + 6.0;
     while t < until {
         let event = "orbital:quake.siren".to_string();
-        p.ev.push((t as f32, Act::Heard { far: event.clone(), event, at: all.clone(), volume: (0.12 * vol).min(1.0), near: QT_HEAR, reach: QT_HEAR, here: true }));
+        p.ev.push((t as f32, Act::Heard { far: event.clone(), event, at: Vec::new(), volume: (0.12 * vol).min(1.0), near: QT_HEAR, reach: QT_HEAR, here: true, net: Some(NET_ALL) }));
         t += 16.0;
     }
 }
 
+/// The J-Alert's general alert for every laser but the Earthquake and the Tsunami (which have their own warnings): on
+/// or off (`/orbital alertsirens`, the wheel's SIRENS for them; kept) and its volume (the player's siren volume).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AlertConfig {
+    pub on: bool,
+    pub vol: f32,
+}
+thread_local! {
+    static ALERT: std::cell::Cell<AlertConfig> = const { std::cell::Cell::new(AlertConfig { on: true, vol: 1.0 }) };
+}
+pub fn alert_config() -> AlertConfig {
+    ALERT.with(std::cell::Cell::get)
+}
+pub fn alert_configure(c: AlertConfig) {
+    ALERT.with(|a| a.set(c));
+}
+/// The general alert's whole cycle (seconds): the recording (some 14 s) and a pause before the next.
+pub const ALERT_CYCLE: f64 = 24.0;
+/// The J-Alert's general alert as a laser strikes, until `until`: the network's poles put up round the player
+/// (`net_watch`) and each group of them sounding `quake.alert` (the player's recording where they put one in) every
+/// `ALERT_CYCLE`, a few seconds apart, heard from the nearest pole up as the Earthquake's sirens are; none with it off.
+pub fn alert_sirens(p: &mut Plan, me: [f64; 3], terrain: bool, seed: u32, until: f64) {
+    let c = alert_config();
+    if !c.on || c.vol <= 0.0 {
+        net_stop();
+        return;
+    }
+    net_start(terrain, seed);
+    let end = until as f32;
+    p.later(0.1, move |q| net_watch(q, me, 0.1, end));
+    for g in 0..NET_GROUPS {
+        let mut t = 0.6 + super::mh(u32::from(g), seed, 0x5a3) * 4.0 + 2.5 * f64::from(g);
+        while t < until {
+            let event = "orbital:quake.alert".to_string();
+            p.ev.push((t as f32, Act::Heard { far: format!("{event}_far"), event, at: Vec::new(), volume: QT_POLE_VOL * c.vol, near: QT_NEAR, reach: QT_HEAR, here: false, net: Some(g) }));
+            t += ALERT_CYCLE;
+        }
+    }
+}
+
 /// The disaster-prevention radio's earthquake alert from the poles at `t`, a broadcast a pole as `sirens` has them.
-pub fn eew_alert(p: &mut Plan, poles: &[[f64; 2]], y: f64, me: [f64; 3], t: f64, vol: f32, seed: u32) {
+pub fn eew_alert(p: &mut Plan, t: f64, vol: f32, seed: u32) {
     if vol <= 0.0 {
         return;
     }
-    for (k, &[x, z]) in poles.iter().enumerate() {
-        let d = (x - me[0]).hypot(z - me[2]);
-        let late = super::mh(k as u32, seed, 0x5a2) * 1.5 + d / 343.0;
+    for g in 0..NET_GROUPS {
+        let late = super::mh(u32::from(g), seed, 0x5a2) * 1.5 + 0.6 * f64::from(g);
         let event = "orbital:quake.eew".to_string();
-        p.ev.push(((t + late) as f32, Act::Heard { far: format!("{event}_far"), event, at: vec![[x, y + 9.0, z]], volume: 0.8 * QT_POLE_VOL * vol, near: QT_NEAR, reach: QT_HEAR, here: false }));
+        p.ev.push(((t + late) as f32, Act::Heard { far: format!("{event}_far"), event, at: Vec::new(), volume: 0.8 * QT_POLE_VOL * vol, near: QT_NEAR, reach: QT_HEAR, here: false, net: Some(g) }));
     }
 }
 
@@ -629,7 +971,11 @@ pub fn qk_tsunami_extras(p: &mut Plan, geo: &super::tsunami::TsGeo, h: HandOff, 
             }
         }
     }
-    sirens(p, &h.poles, geo.t[1], me, 0.0, tt + 24.0, h.major, h.siren, h.seed);
+    // (the quake's network of poles kept, still put up round the player as they go)
+    sirens(p, 0.0, tt + 24.0, h.major, h.siren, h.seed);
+    if h.siren > 0.0 {
+        p.later(0.1, move |q| net_watch(q, me, 0.1, (tt + 24.0) as f32));
+    }
     let t0 = (tt - 1.5) as f32;
     p.at(t0, "title @s times 5 60 20");
     p.at(t0, format!(r##"title @s subtitle {{"text":"{}  ·  get to high ground","color":"#{:06X}"}}"##, h.expect, h.color));
@@ -672,31 +1018,230 @@ mod tests {
     use super::*;
     use crate::strike::quake::QK_PRESETS;
 
+    /// The plan played out against a world whose ground is `ground` and water over it `water` (its depth), each stage
+    /// worked out as it falls due and each survey answered at once, until `until`: what it gave, stages left out.
+    fn drive(mut plan: Vec<(f32, Act)>, until: f32, ground: fn(i32, i32) -> Option<i32>, water: fn(i32, i32) -> Option<i32>) -> Vec<(f32, Act)> {
+        crate::ground::set_test(Some(ground));
+        let mut out = Vec::new();
+        while !plan.is_empty() {
+            plan.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let (t, act) = plan.remove(0);
+            match act {
+                // (past `until`, what is given kept, no more worked out)
+                Act::Later(_) | Act::Soon(_) | Act::Survey { .. } if t > until => {}
+                Act::Later(job) | Act::Soon(job) => plan.extend(job()),
+                Act::Survey { tag, columns } => {
+                    crate::ground::test_answer(tag, &columns);
+                    let wet: Vec<((i32, i32), i32)> = columns.iter().filter_map(|&(x, z)| water(x, z).map(|w| ((x, z), w))).collect();
+                    crate::ground::set_test_water(&wet);
+                }
+                a => out.push((t, a)),
+            }
+        }
+        out
+    }
+    fn plan() -> Plan {
+        Plan { laser: &crate::lasers::EARTHQUAKE, ev: Vec::new(), rng: super::super::Rng::new(1), bx: 0, by: 64, bz: 0 }
+    }
+
+    /// The sea west of x = 37 (its bed at 50, twelve of water over it to the sea's level), the land east of it at 66.
+    fn west_sea_ground(x: i32, _: i32) -> Option<i32> {
+        Some(if x < 37 { 50 } else { 66 })
+    }
+    fn west_sea_water(x: i32, _: i32) -> Option<i32> {
+        (x < 37).then_some(12)
+    }
+
     #[test]
-    fn a_siren_pole_planned_in_the_sea_goes_up_on_the_nearest_land() {
-        // (the sea west of x = 37, the land east of it; a pole planned at the origin, out in the sea)
-        crate::ground::set_test(Some(|x, _| Some(if x < 37 { 50 } else { 66 })));
-        let offs = site_offsets();
-        let cols: Vec<(i32, i32)> = offs.clone();
+    fn sirens_go_up_on_every_stretch_of_land_round_the_player_wherever_they_go_and_none_at_sea() {
+        crate::meter::reset();
+        net_start(true, 7);
+        let mut p = plan();
+        let me = [60.5, 67.0, 0.5];
+        p.later(0.0, move |q| net_watch(q, me, 0.0, 12.0));
+        let out = drive(p.ev, 12.0, west_sea_ground, west_sea_water);
+        let poles = net_heard(NET_ALL);
+        // (a pole in each square near the player with land in it, on that land, its horns nine up)
+        assert!(poles.len() >= 3, "{poles:?}");
+        let nearest = poles.iter().map(|p| (p[0] - me[0]).hypot(p[2] - me[2])).fold(f64::MAX, f64::min);
+        assert!(nearest < 160.0, "one near the player: {nearest}");
+        assert!(poles.iter().all(|p| p[0] >= 37.0 && p[1] == 75.0), "{poles:?}");
+        let built: Vec<&Blocks> = out.iter().filter_map(|(_, a)| if let Act::Blocks(b) = a { Some(&**b) } else { None }).collect();
+        assert_eq!(built.len(), poles.len(), "each pole put up as blocks, once");
+        assert!(built.iter().all(|b| b.runs.iter().all(|r| r.x >= 36)), "none in the sea");
+        // (and every one near enough the player: none more than a square and a half off)
+        assert!(poles.iter().all(|p| (p[0] - me[0]).hypot(p[2] - me[2]) < NET_R + f64::from(NET_LOOK) + 40.0));
+        // (the groups between them: each pole in one)
+        let by_group: usize = (0..NET_GROUPS).map(|g| net_heard(g).len()).sum();
+        assert_eq!(by_group, poles.len());
+        // a long way off (teleported): poles there too, the first kept
+        let mut p = plan();
+        let far = [2000.5, 67.0, 3000.5];
+        p.later(0.0, move |q| net_watch(q, far, 0.0, 12.0));
+        drive(p.ev, 12.0, west_sea_ground, west_sea_water);
+        let now = net_heard(NET_ALL);
+        assert!(now.iter().any(|p| (p[0] - far[0]).hypot(p[2] - far[2]) < 150.0), "a pole near where they went");
+        assert!(now.len() > poles.len() && poles.iter().all(|p| now.contains(p)));
+        // out at sea, far from any land: none
+        net_start(true, 7);
+        let mut p = plan();
+        let sea = [-900.5, 63.0, 0.5];
+        p.later(0.0, move |q| net_watch(q, sea, 0.0, 12.0));
+        drive(p.ev, 12.0, west_sea_ground, west_sea_water);
+        assert!(net_heard(NET_ALL).is_empty());
+        // with the terrain off: where they would stand, but none built
+        net_start(false, 7);
+        let mut p = plan();
+        p.later(0.0, move |q| net_watch(q, me, 0.0, 12.0));
+        let out = drive(p.ev, 12.0, west_sea_ground, west_sea_water);
+        assert!(!net_heard(NET_ALL).is_empty() && !out.iter().any(|(_, a)| matches!(a, Act::Blocks(_))));
+        // the sirens heard from them, none with them off
+        let mut p = plan();
+        sirens(&mut p, 0.0, 100.0, true, 1.0, 3);
+        eew_alert(&mut p, 1.0, 1.0, 3);
+        assert!(p.ev.iter().all(|(_, a)| matches!(a, Act::Heard { net: Some(_), .. })));
+        assert!(p.ev.len() > 12);
+        net_stop();
+        assert!(net_heard(NET_ALL).is_empty());
+        crate::ground::set_test(None);
+    }
+
+    /// The sea south of z = -60, a river eight wide at x 20 to 27 (at the sea's level), a pond up on the hill at x 100 to
+    /// 140 (above it), the land at 66.
+    fn coast_ground(x: i32, z: i32) -> Option<i32> {
+        Some(if z < -60 { 50 } else if (20..28).contains(&x) { 59 } else if (100..140).contains(&x) && (0..40).contains(&z) { 64 } else { 66 })
+    }
+    fn coast_water(x: i32, z: i32) -> Option<i32> {
+        if z < -60 {
+            Some(12)
+        } else if (20..28).contains(&x) {
+            Some(4)
+        } else if (100..140).contains(&x) && (0..40).contains(&z) {
+            Some(8)
+        } else {
+            None
+        }
+    }
+
+    #[test]
+    fn the_tsunami_comes_to_the_open_sea_nearest_the_player_not_a_river_or_a_pond() {
+        crate::meter::reset();
+        let me = [0.5, 67.0, 0.5];
+        crate::ground::set_test(Some(coast_ground));
+        let cols = coast_columns(me);
         let tag = crate::ground::new_tag();
         crate::ground::test_answer(tag, &cols);
-        let sea: Vec<((i32, i32), i32)> = cols.iter().filter(|c| c.0 < 37).map(|&c| (c, 12)).collect();
-        crate::ground::set_test_water(&sea);
-        let (x, z, g) = dry_spot(0, 0, &offs).expect("land near");
-        // (the nearest firm land: the step after the coast, its own steps round it dry too)
-        assert!((37 + SITE_STEP..=37 + 2 * SITE_STEP).contains(&x) && z == 0 && g == 66, "{x} {z} {g}");
-        // its sounds from there, at its horns
-        SITED.with(|s| s.borrow_mut().push(([0.5, 0.5], [f64::from(x) + 0.5, f64::from(z) + 0.5, f64::from(g)])));
-        assert_eq!(sited([0.5, 59.0, 0.5]), [f64::from(x) + 0.5, 75.0, 0.5]);
-        assert_eq!(sited([300.5, 59.0, 0.5]), [300.5, 59.0, 0.5], "another place as planned");
-        // (and the pole stands on that ground, not on each column's top)
-        let b = siren_pole_at(x, z, Some(g));
-        assert!(b.runs.iter().all(|r| r.surface.is_none()) && b.runs.iter().any(|r| r.y == g && r.height == 11));
-        // all sea: none, it goes up where planned
-        crate::ground::set_test_water(&cols.iter().map(|&c| (c, 12)).collect::<Vec<_>>());
-        assert_eq!(dry_spot(0, 0, &offs), None);
+        crate::ground::set_test_water(&cols.iter().filter_map(|&(x, z)| coast_water(x, z).map(|w| ((x, z), w))).collect::<Vec<_>>());
+        let (t, nm) = find_coast(me).expect("the sea to the south");
+        assert!((t[2] + 60.0).abs() <= 9.0 && t[0].abs() <= 9.0 && t[1] == f64::from(SEA + 1), "the shore south of the player: {t:?}");
+        assert!(nm[1] > 0.9, "inland: north, towards the player: {nm:?}");
+        // (the sea's columns there, for the sea to draw back from: water at its level over its bed)
+        let sea_cols = coast_sea_columns(t, nm);
+        let tag = crate::ground::new_tag();
+        crate::ground::test_answer(tag, &sea_cols);
+        crate::ground::set_test_water(&sea_cols.iter().filter_map(|&(x, z)| coast_water(x, z).map(|w| ((x, z), w))).collect::<Vec<_>>());
+        let mut chunks = SeaChunks::new();
+        coast_sea_cols(&mut chunks, &sea_cols);
+        let q = &QK_PRESETS[0];
+        let st = sea_time(q, 60.0).unwrap();
+        let target = super::super::Target { block: [400, 70, 400], point: [400.5, 71.0, 400.5] };
+        let geo = QkGeo::new(0, &target, [400.5, 71.0, 600.5], 17.0);
+        let f = coast_flood(&geo, st, t, nm, chunks);
+        assert!(f.moved && f.chunks.len() > 20, "{}", f.chunks.len());
+        // (the sea's surface at 61, its bed at 49; the river's mouth with it, at its own; only what was asked about)
+        let asked: std::collections::HashSet<(i32, i32)> = sea_cols.iter().copied().collect();
+        for c in &f.chunks {
+            for (i, col) in c.cols.iter().enumerate() {
+                let (x, z) = (c.cx * 16 + (i % 16) as i32, c.cz * 16 + (i / 16) as i32);
+                match coast_water(x, z).filter(|_| asked.contains(&(x, z))) {
+                    Some(12) => assert!(col.kind == Kind::Sea && col.base == 49 && col.orig == 61),
+                    Some(4) => assert!(col.kind == Kind::Sea && col.base == 58 && col.orig == 62),
+                    _ => assert!(col.kind == Kind::Alone),
+                }
+            }
+        }
+        // (and the drawing back works from there: along its own way inland)
+        let (_, d) = f.geo.ud(t[0], t[2] - 40.0);
+        assert!(d < -35.0, "out to sea is d < 0: {d}");
+        // no open sea near: none (a river and a pond are not one)
+        let me2 = [0.5, 67.0, 300.5];
+        let cols = coast_columns(me2);
+        let tag = crate::ground::new_tag();
+        crate::ground::test_answer(tag, &cols);
+        crate::ground::set_test_water(&cols.iter().filter_map(|&(x, z)| coast_water(x, z).map(|w| ((x, z), w))).collect::<Vec<_>>());
+        assert_eq!(find_coast(me2), None);
         crate::ground::set_test(None);
-        SITED.with(|s| s.borrow_mut().clear());
+    }
+
+    #[test]
+    fn a_quakes_tsunami_moves_to_the_coast_the_player_is_near_and_draws_its_sea_back() {
+        crate::meter::reset();
+        // (the quake fired a long way inland; the player by the sea at the origin as it is about to draw back)
+        let target = super::super::Target { block: [900, 70, 900], point: [900.5, 71.0, 900.5] };
+        let geo = Rc::new(QkGeo::new(0, &target, [900.5, 71.0, 950.5], 17.0));
+        let st = sea_time(geo.q, 60.0).unwrap();
+        let old = Flood::new(geo.clone(), st);
+        let flood = Rc::new(RefCell::new(old));
+        set_pending(HandOff { flood: Some(flood.clone()), k: 0.08, kind: "MAJOR TSUNAMI WARNING", color: 0, expect: "10 m+", major: true, siren: 1.0, seed: 1, sea: (geo.t, geo.nm), coast: None });
+        let mut p = plan();
+        let me = [0.5, 67.0, 0.5];
+        let at = (st.draw - 22.0) as f32;
+        relocate(&mut p, geo.clone(), st, me, at, Some(flood.clone()), vec![0; super::super::quake::QK_TAB_COAST + 4], 400.0);
+        let out = drive(p.ev, st.draw as f32, coast_ground, coast_water);
+        let h = take_pending().expect("still pending");
+        let (block, point) = h.coast.expect("moved to the player's coast");
+        assert!(block[1] == SEA && (block[2] + 60).abs() <= 9 && point[1] == f64::from(SEA + 1), "{block:?}");
+        assert!(h.sea.1[1] > 0.9, "the wave comes in from the sea, south: {:?}", h.sea.1);
+        // (the pass told where: its table's coast, and the chunks kept loaded)
+        let i = super::super::quake::QK_TAB_COAST;
+        assert!(out.iter().any(|(_, a)| matches!(a, Act::Table(w) if f32::from_bits(w[i + 3]) > 0.9)));
+        assert!(out.iter().any(|(_, a)| matches!(a, Act::Cmd(c) if c.starts_with("forceload add"))));
+        assert!(out.iter().any(|(_, a)| matches!(a, Act::Spare(c) if c.starts_with("forceload remove"))));
+        let f = flood.borrow();
+        assert!(f.moved && !f.chunks.is_empty(), "the coast's sea is the one that draws back");
+        drop(f);
+        // the sea there draws back before the wave
+        let mut q = plan();
+        let mut fb = flood.borrow_mut();
+        for k in 0..fb.chunks.len() {
+            crate::meter::reset();
+            visit(&mut fb, k, st.end - 0.5, &mut q);
+        }
+        assert!(fb.chunks.iter().any(|c| c.cols.iter().any(|c| c.kind == Kind::Sea && c.cur < c.orig - 3)), "the sea drawn back");
+        // (none near the player: left at the target's coast)
+        drop(fb);
+        set_pending(HandOff { flood: None, k: 0.08, kind: "", color: 0, expect: "", major: true, siren: 1.0, seed: 1, sea: (geo.t, geo.nm), coast: None });
+        let mut p = plan();
+        relocate(&mut p, geo.clone(), st, [0.5, 67.0, 300.5], at, None, vec![0; super::super::quake::QK_TAB_COAST + 4], 400.0);
+        drive(p.ev, st.draw as f32, coast_ground, coast_water);
+        assert!(take_pending().is_some_and(|h| h.coast.is_none()));
+        crate::ground::set_test(None);
+    }
+
+    #[test]
+    fn every_other_lasers_strike_sounds_the_general_alert_from_the_poles_and_every_tsunami_the_major_siren() {
+        // (the general alert: each group of poles every ALERT_CYCLE, from the network, at the sirens' volume)
+        alert_configure(AlertConfig { on: true, vol: 0.5 });
+        let mut p = plan();
+        alert_sirens(&mut p, [0.5, 70.0, 0.5], true, 9, 60.0);
+        let alerts: Vec<&Act> = p.ev.iter().map(|(_, a)| a).filter(|a| matches!(a, Act::Heard { event, .. } if event == "orbital:quake.alert")).collect();
+        assert!(alerts.len() >= 2 * usize::from(NET_GROUPS), "{}", alerts.len());
+        assert!(alerts.iter().all(|a| matches!(a, Act::Heard { net: Some(g), volume, far, .. } if *g < NET_GROUPS && (*volume - 0.5 * QT_POLE_VOL).abs() < 1e-6 && far == "orbital:quake.alert_far")));
+        assert!(p.ev.iter().any(|(_, a)| matches!(a, Act::Later(_))), "the network watched");
+        assert!(p.ev.iter().all(|(t, _)| *t < 60.0));
+        // (off: none, and no poles)
+        alert_configure(AlertConfig { on: false, vol: 1.0 });
+        let mut p = plan();
+        alert_sirens(&mut p, [0.5, 70.0, 0.5], true, 9, 60.0);
+        assert!(p.ev.is_empty() && net_heard(NET_ALL).is_empty());
+        alert_configure(AlertConfig { on: true, vol: 1.0 });
+        // a tsunami's warning, whatever its height, on the Major Tsunami Warning's siren (the player's recording)
+        for major in [true, false] {
+            let mut p = plan();
+            sirens(&mut p, 0.0, 120.0, major, 1.0, 4);
+            assert!(p.ev.iter().all(|(_, a)| matches!(a, Act::Heard { event, .. } if event == "orbital:quake.major" || event == "orbital:quake.siren")));
+            assert!(p.ev.iter().any(|(_, a)| matches!(a, Act::Heard { event, .. } if event == "orbital:quake.major")));
+        }
     }
 
     #[test]
