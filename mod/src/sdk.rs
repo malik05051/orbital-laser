@@ -37,6 +37,8 @@ pub mod fake {
         pub ran: Vec<String>,
         /// The kicks given the player (`push-player`).
         pub pushes: u64,
+        /// The sounds played (event names), while a test asks for the commands (`keep_commands`).
+        pub sounds: Vec<String>,
         pub logs: Vec<String>,
         /// Whether the player holds the Designator (`holding_designator` in lib.rs).
         pub holding: bool,
@@ -186,7 +188,13 @@ pub mod fake {
                 }
             });
         }
-        pub fn play_sound(_event: &str, _at: Option<(f64, f64, f64)>, _volume: f32, _pitch: f32) {}
+        pub fn play_sound(event: &str, _at: Option<(f64, f64, f64)>, _volume: f32, _pitch: f32) {
+            super::with(|w| {
+                if w.keep_commands {
+                    w.sounds.push(event.to_string());
+                }
+            });
+        }
         pub fn set_flying_speed(_speed: Option<f32>) {}
         pub fn push_player(_x: f32, _y: f32, _z: f32) {
             super::with(|w| w.pushes += 1);

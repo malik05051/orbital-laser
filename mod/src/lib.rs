@@ -104,7 +104,7 @@ fn pass_of(l: &lasers::Laser) -> usize {
         "payload" => 5,
         "nuke" => 6,
         "rod" => 7,
-        "supercell" => 8,
+        "supercell" | "tornado" => 8,
         "hurricane" => 9,
         "fold" => 10,
         "supervolcano" => 11,
@@ -138,6 +138,8 @@ const SETTINGS: &str = "settings";
 /// The strikes with no laser's pass: a false earthquake alert, and the Tsunami's countdown to its wave (`fire_plain`).
 const FALSE_ALERT: &str = "falsealert";
 const TS_COUNTDOWN: &str = "tsunamicountdown";
+/// The warning before a strike fired with a delay (`strike::warning_plan`): the laser itself fired as it ends.
+const WARNING: &str = "warning";
 /// The storage key that says which pass the game is building while it builds one (`Orbital::hand_post`).
 const BUILDING: &str = "building";
 /// The storage key holding the forceload removes the strike under way owes the world, with its dimension and the
@@ -259,6 +261,8 @@ struct Strike {
     hand_t: f32,
     /// An Earthquake's target: if it raised a tsunami (`strike::qk_take_pending`), the Tsunami fired there as it ends.
     tsunami_after: Option<([i32; 3], [f64; 3])>,
+    /// A warning before a strike (`WARNING`): the laser fired as it ends, at its target and point.
+    then: Option<(&'static lasers::Laser, [i32; 3], [f64; 3])>,
 }
 
 /// Whether a strike tints the first-person hand (`render.set-hand-tint`). Off for now: under the Supervolcano it went
@@ -316,6 +320,10 @@ fn command_paths() -> Vec<String> {
         add(&["alertsirens", v]);
     }
     add(&["tsunamiarrival", "now"]);
+    add(&["strikedelay", "now"]);
+    for e in strike::TORNADO_EF.iter() {
+        add(&["tornadoef", &e.name.to_lowercase()]);
+    }
     add(&["quakecancel"]);
     add(&["cancelalert"]);
     for a in strike::APPROACHES.iter() {
@@ -539,6 +547,8 @@ struct Orbital {
     siren_volume: u32,
     /// The Earthquake's J-Alert siren poles: put up and sounding (`/orbital quakesirens`, the wheel's SIRENS; kept).
     quake_sirens: bool,
+    /// A warning's laser being fired as it ends (`then`): no second warning for it.
+    firing_delayed: bool,
     /// How the Fold's droplet stops (fold.wgsl's fd_stop; `/orbital foldstop N`, a dev command for trying them, not kept).
     fold_stop: usize,
     /// While the Fold's sphere is shut round the player (`strike::FD_STAY`): their flight kept to vanilla's at most.
@@ -673,6 +683,7 @@ impl Orbital {
             tsunami_time,
             siren_volume,
             quake_sirens,
+            firing_delayed: false,
             fold_stop: 4,
             knock,
             gravity,
@@ -712,7 +723,7 @@ impl Orbital {
     }
     fn save(&self) {
         let text = format!(
-            "laser={}\nterrain={}\nhud={}\napproach={}\narrival={}\npage={}\nflyspeed={}\npayloadsound={}\nnukesound={}\nquality={}\nimpactframes={}\nfoldpattern={}\nquake={}\ntsunamitime={}\nsirenvolume={}\ntsunamiheight={}\ntsunamisirens={}\ncustomquake={}\nquakesirens={}\ntsunamiarrival={}\nquakefalse={}\nquakecancel={}\nalertsirens={}\nknockback={}\ngravity={}\ncarryview={}\nfollow={}\nfollowdistance={}\nseed={}\n",
+            "laser={}\nterrain={}\nhud={}\napproach={}\narrival={}\npage={}\nflyspeed={}\npayloadsound={}\nnukesound={}\nquality={}\nimpactframes={}\nfoldpattern={}\nquake={}\ntsunamitime={}\nsirenvolume={}\ntsunamiheight={}\ntsunamisirens={}\ncustomquake={}\nquakesirens={}\ntsunamiarrival={}\nquakefalse={}\nquakecancel={}\nalertsirens={}\nstrikedelay={}\ntornado={}\nknockback={}\ngravity={}\ncarryview={}\nfollow={}\nfollowdistance={}\nseed={}\n",
             LASERS[self.laser].key,
             u8::from(self.terrain),
             u8::from(self.hud),
@@ -740,6 +751,8 @@ impl Orbital {
             if strike::qk_false().on { "on" } else { "off" },
             strike::qk_false().cancel,
             if strike::alert_config().on { "on" } else { "off" },
+            strike::warn_delay(),
+            strike::TORNADO_EF[strike::tornado_ef()].name.to_lowercase(),
             if self.knock { "on" } else { "off" },
             if self.gravity { "on" } else { "off" },
             if self.carry_turn { "turn" } else { "still" },
@@ -858,6 +871,12 @@ impl Orbital {
                         strike::qk_set_false(strike::QkFalse { cancel: n, ..strike::qk_false() });
                     }
                 }
+                Some(("tornado", v)) => {
+                    if let Some(k) = strike::TORNADO_EF.iter().position(|e| e.name.eq_ignore_ascii_case(v)) {
+                        strike::set_tornado_ef(k);
+                    }
+                }
+                Some(("strikedelay", v)) => strike::warn_set_delay(v.parse::<u32>().unwrap_or(0)),
                 Some(("alertsirens", v)) => strike::alert_configure(strike::AlertConfig { on: v != "off", ..strike::alert_config() }),
                 Some(("tsunamitime", v)) => tsunami_time = v.parse::<u32>().ok().map_or(0, |n| n.clamp(10, strike::QT_COUNTDOWN_MAX as u32)),
                 Some(("knockback", v)) => knock = v != "off",
@@ -1143,6 +1162,18 @@ impl Orbital {
             }
             Some(wheel::Spot::TsStep(d)) => {
                 strike::ts_height_step(d);
+                self.save();
+                world::play_sound("minecraft:ui.button.click", None, 0.6, if d > 0 { 1.5 } else { 1.1 });
+                self.show_wheel();
+            }
+            Some(wheel::Spot::Tornado(k)) => {
+                strike::set_tornado_ef(k);
+                self.save();
+                world::play_sound("minecraft:ui.button.click", None, 0.6, 1.0 + 0.12 * k as f32);
+                self.show_wheel();
+            }
+            Some(wheel::Spot::Delay(d)) => {
+                strike::warn_delay_step(d);
                 self.save();
                 world::play_sound("minecraft:ui.button.click", None, 0.6, if d > 0 { 1.5 } else { 1.1 });
                 self.show_wheel();
@@ -1457,6 +1488,8 @@ impl Orbital {
             // (its sirens off: no poles put up, none sounding, nor the Tsunami's after it)
             strike::qk_configure(strike::QkConfig { countdown, siren: if self.quake_sirens { self.siren_volume as f32 / 100.0 } else { 0.0 } });
             self.quake
+        } else if laser.key == "tornado" {
+            strike::tornado_ef()
         } else { wheel::sound_of(laser.key).map_or(self.approach, |s| usize::from(self.blast_alt[s])) };
         // (the Tsunami fired on its own: the wave at the height set for it, and its sirens' volume; an Earthquake's has its own)
         let own_tsunami = laser.key == "tsunami" && strike::qk_active_sea().is_none();
@@ -1465,6 +1498,18 @@ impl Orbital {
             c.siren = self.siren_volume as f32 / 100.0;
             strike::ts_configure(c);
             strike::ts_set_scale(strike::ts_k_for(&target, me, seed, c.height));
+        }
+        // (fired with a delay: its warning first, the strike as it ends; not the Tsunami, which has its own, nor an
+        // Earthquake's tsunami, nor a false alert)
+        let delay = strike::warn_delay();
+        if delay > 0 && !self.firing_delayed && strike::warns(laser.key) && strike::qk_active_sea().is_none() && !(laser.key == "earthquake" && strike::qk_false().on) {
+            strike::alert_configure(strike::AlertConfig { on: strike::alert_config().on, vol: self.siren_volume as f32 / 100.0 });
+            let plan = strike::warning_plan(laser, &target, self.terrain, seed, me, delay);
+            self.fire_plain(WARNING, plan, delay as f32, None, block);
+            if let Some(s) = &mut self.strike {
+                s.then = Some((laser, block, point));
+            }
+            return;
         }
         // (a false earthquake alert, and the Tsunami fired on its own with an arrival set: their warnings only, no pass)
         if laser.key == "earthquake" && strike::qk_false().on {
@@ -1483,6 +1528,9 @@ impl Orbital {
         if laser.key != "earthquake" && laser.key != "tsunami" {
             strike::alert_configure(strike::AlertConfig { on: strike::alert_config().on, vol: self.siren_volume as f32 / 100.0 });
             plan.extend(strike::alert_plan(laser, &target, self.terrain, seed, me, f64::from(laser.length)));
+            // (in time order with the laser's own: the strike takes its plan in order, so added at the end the alert and
+            // the poles' stage came only after everything else, too late or never)
+            plan.sort_by(|a, b| a.0.total_cmp(&b.0));
         }
         // (the Fold asks how low the land lies round the target; `tick` takes the answer in)
         let level_tag = (laser.key == "fold").then(|| {
@@ -1526,7 +1574,7 @@ impl Orbital {
         if laser.key == "tsunami" && strike::ts_scale() < 1.0 {
             params[10] = strike::ts_scale() as f32;
         }
-        if laser.key == "payload" || laser.key == "nuke" || laser.key == "rod" || laser.key == "supercell" || laser.key == "hurricane" || laser.key == "tsunami" || laser.key == "fold" || laser.key == "supervolcano" || laser.key == "skybreak" || laser.key == "carpetbomb" {
+        if laser.key == "payload" || laser.key == "nuke" || laser.key == "rod" || laser.key == "supercell" || laser.key == "tornado" || laser.key == "hurricane" || laser.key == "tsunami" || laser.key == "fold" || laser.key == "supervolcano" || laser.key == "skybreak" || laser.key == "carpetbomb" {
             // (where the player stood as it fired: the shockwave's dust follows the land from the target's ground to theirs)
             params[12..15].copy_from_slice(&[me[0] as f32, me[1] as f32, me[2] as f32]);
             params[15] = self.flags_of(laser.index);
@@ -1562,7 +1610,7 @@ impl Orbital {
         // (the sinkhole's slabs, rings and rim come on the tick after: strike::sh_table, as Act::Table)
         let data = if laser.key == "crystalbloom" { strike::cb_table(seed) } else { Vec::new() };
         render::set_data(&data);
-        self.strike = Some(Strike { plan, next, more: Default::default(), given: 0, ticks, length, params, level: level_tag.map(|t| (t, target.block)), waiting: Default::default(), urgent: Default::default(), data, data_sent: true, skipped, wait, sounds: Default::default(), key: laser.key, sprites: if laser.key == "hurricane" { sdk::atlas::resources_version() } else { 0 }, hand: None, hand_t: 0.0, tsunami_after: (laser.key == "earthquake").then_some((block, point)) });
+        self.strike = Some(Strike { plan, next, more: Default::default(), given: 0, ticks, length, params, level: level_tag.map(|t| (t, target.block)), waiting: Default::default(), urgent: Default::default(), data, data_sent: true, skipped, wait, sounds: Default::default(), key: laser.key, sprites: if laser.key == "hurricane" { sdk::atlas::resources_version() } else { 0 }, hand: None, hand_t: 0.0, tsunami_after: (laser.key == "earthquake").then_some((block, point)), then: None });
         self.hold_forceloads(&dimension, clock, length + wait as f32 * 0.05);
         // (the Hurricane's wind carrying the player off once it reaches them, with the knockback on)
         self.carrying = (laser.key == "hurricane" && self.knock && player.is_some()).then(|| carry::Carry::new([block[0] as f64 + 0.5, block[1] as f64 + 1.0, block[2] as f64 + 0.5]));
@@ -1592,7 +1640,7 @@ impl Orbital {
         let mut plan = plan;
         plan.sort_by(|a, b| a.0.total_cmp(&b.0));
         log::write(log::Level::Info, &format!("strike [{key}] at {} {} {}, {length:.0} s", block[0], block[1], block[2]));
-        self.strike = Some(Strike { plan, next: 0, more: Default::default(), given: 0, ticks: 0, length, params, level: None, waiting: Default::default(), urgent: Default::default(), data: Vec::new(), data_sent: true, skipped: 0.0, wait: 0, sounds: Default::default(), key, sprites: 0, hand: None, hand_t: 0.0, tsunami_after: after });
+        self.strike = Some(Strike { plan, next: 0, more: Default::default(), given: 0, ticks: 0, length, params, level: None, waiting: Default::default(), urgent: Default::default(), data: Vec::new(), data_sent: true, skipped: 0.0, wait: 0, sounds: Default::default(), key, sprites: 0, hand: None, hand_t: 0.0, tsunami_after: after, then: None });
         self.unfollow();
         if let Some(w) = &mut self.wheel {
             w.striking = true;
@@ -1819,9 +1867,16 @@ impl Orbital {
         if now >= s.length {
             // (an Earthquake that raised a tsunami hands over to the Tsunami at its target, its wave at the quake's size)
             let after = s.tsunami_after.take();
+            let then = s.then.take();
             let (key, at) = (s.key, (s.params[4].floor() as i32, s.params[5].floor() as i32));
             self.end_strike();
             self.settle_after(key, at);
+            // (a warning over: the laser strikes now, at the target it was fired at)
+            if let Some((laser, block, point)) = then {
+                self.firing_delayed = true;
+                self.fire_at(laser, block, point);
+                self.firing_delayed = false;
+            }
             if let (Some(after), Some(h)) = (after, strike::qk_take_pending()) {
                 // (to the coast the player was near as the sea drew back, if one was found; else the quake's target)
                 let (block, point) = h.coast.unwrap_or(after);
@@ -2245,10 +2300,10 @@ impl Orbital {
                 lines.push((format!("Arrival: it {}", ARRIVALS[self.arrival].label), 0xA8B0BC));
                 lines.push((format!("Colour: {}", COLOURS[self.colours[self.laser]].label), COLOUR_RGB[self.colours[self.laser]]));
             }
-            if l.key == "payload" || l.key == "nuke" || l.key == "rod" || l.key == "supercell" || l.key == "hurricane" || l.key == "supervolcano" || l.key == "skybreak" || l.key == "carpetbomb" {
+            if l.key == "payload" || l.key == "nuke" || l.key == "rod" || l.key == "supercell" || l.key == "tornado" || l.key == "hurricane" || l.key == "supervolcano" || l.key == "skybreak" || l.key == "carpetbomb" {
                 lines.push((format!("Quality: {}", if self.fast { "fast (smoke at half size)" } else { "full" }), 0xA8B0BC));
             }
-            if l.key == "nuke" || l.key == "rod" || l.key == "hurricane" || l.key == "tsunami" || l.key == "supervolcano" || l.key == "carpetbomb" {
+            if l.key == "nuke" || l.key == "rod" || l.key == "hurricane" || l.key == "tornado" || l.key == "tsunami" || l.key == "supervolcano" || l.key == "carpetbomb" {
                 lines.push((format!("Knockback: {}", if self.knock { "on" } else { "off" }), 0xA8B0BC));
             }
             if self.terrain && strike::gv_reach(l.key).is_some() {
@@ -2261,6 +2316,11 @@ impl Orbital {
             }
             if l.key != "earthquake" && l.key != "tsunami" && !strike::alert_config().on {
                 lines.push(("Alert sirens: off".to_string(), 0xA8B0BC));
+            }
+            if l.key == "tornado" {
+                let e = &strike::TORNADO_EF[strike::tornado_ef()];
+                lines.push((format!("Tornado: {} ({})", e.name, e.label), 0xC8A060));
+                lines.push((format!("Gusts {}", e.gusts()), 0xC8A060));
             }
             if l.key == "earthquake" {
                 let q = strike::qk_quake(self.quake);
@@ -2296,6 +2356,8 @@ impl Orbital {
                 lines.push(("False alert: /orbital cancelalert".to_string(), 0xF0C060));
             } else if self.strike.as_ref().is_some_and(|s| s.key == TS_COUNTDOWN) {
                 lines.push(("Tsunami coming".to_string(), 0xFF8A65));
+            } else if let Some((l, left)) = self.strike.as_ref().and_then(|s| s.then.map(|t| (t.0, s.length - s.clock()))) {
+                lines.push((format!("{} strikes in {}", l.title, strike::warn_delay_text(left.max(0.0).ceil() as u32)), 0xFF8A65));
             } else if self.strike.is_some() {
                 lines.push(("Strike in progress".to_string(), 0xFF8A65));
             } else {
@@ -2804,6 +2866,41 @@ impl Mod for Orbital {
                     _ => Err(format!("/orbital quakecancel SECONDS ({lo} to {hi}) or MINUTES with an m (2m, up to 10m)")),
                 }
             }
+            (Some("tornadoef"), v) => {
+                let list = "ef0, ef1, ef2, ef3, ef4 or ef5";
+                let parsed = v.map(|v| v.trim_start_matches(['e', 'E']).trim_start_matches(['f', 'F']).parse::<usize>());
+                match parsed {
+                    Some(Ok(k)) if k <= 5 => {
+                        strike::set_tornado_ef(k);
+                        self.save();
+                        let e = &strike::TORNADO_EF[k];
+                        Ok(Some(format!("Tornado: {} ({}), gusts {}: {} (the next strike's)", e.name, e.label, e.gusts(), e.damage)))
+                    }
+                    None => {
+                        let e = &strike::TORNADO_EF[strike::tornado_ef()];
+                        Ok(Some(format!("Tornado: {} ({}), gusts {} (/orbital tornadoef {list})", e.name, e.label, e.gusts())))
+                    }
+                    _ => Err(format!("/orbital tornadoef {list}")),
+                }
+            }
+            (Some("strikedelay"), v) => {
+                let max = strike::DELAY_MAX;
+                // (seconds, or minutes with an m: 300 or 5m; now, at once as fired)
+                let parsed = v.map(|v| match v {
+                    "now" => Some(0),
+                    v if v.ends_with('m') => v.trim_end_matches('m').parse::<f64>().ok().map(|m| (m * 60.0).round() as u32),
+                    v => v.parse::<u32>().ok(),
+                });
+                match parsed {
+                    Some(Some(n)) if n == 0 || (10..=max).contains(&n) => {
+                        strike::warn_set_delay(n);
+                        self.save();
+                        Ok(Some(if n == 0 { "Strike delay: none, every laser strikes as fired".to_string() } else { format!("Strike delay: {} of warning before every laser strikes (the Tsunami keeps its ARRIVAL)", countdown_text(n)) }))
+                    }
+                    None => Ok(Some(format!("Strike delay: {} (/orbital strikedelay SECONDS, 5m, or now)", if strike::warn_delay() == 0 { "none".to_string() } else { countdown_text(strike::warn_delay()) }))),
+                    _ => Err(format!("/orbital strikedelay SECONDS (10 to {max}), MINUTES with an m (5m, up to 30m), or now")),
+                }
+            }
             (Some("cancelalert"), None) => {
                 if self.cancel_alert() { Ok(Some("Earthquake alert canceled".to_string())) } else { Err("No false earthquake alert under way (/orbital quakefalse on, then fire the Earthquake)".to_string()) }
             }
@@ -2883,7 +2980,7 @@ impl Mod for Orbital {
                 Ok(Some(format!("{} loaded", LASERS[self.laser].title)))
             }
             _ => Err(format!(
-                "/orbital give | wheel | terrain on|off | hud on|off | quality full|fast | impactframes kanada|blackflash|cinematic|off | foldpattern a|b|c | foldstop 0-6 | knockback on|off | gravity on|off | tsunamiheight N|max | tsunamisirens on|off | tsunamiarrival N|5m|now | quakeshaking N|auto | quaketsunami yes|no | quakesirens on|off | quakefalse on|off | quakecancel N|2m | cancelalert | alertsirens on|off | carryview turn|still | follow on|off|distance N | seed N|lock|random | payloadsound|nukesound main|alt | flyspeed N|reset | stop | skip SECONDS | approach {} | arrival {} | colour {} | {}",
+                "/orbital give | wheel | terrain on|off | hud on|off | quality full|fast | impactframes kanada|blackflash|cinematic|off | foldpattern a|b|c | foldstop 0-6 | knockback on|off | gravity on|off | tsunamiheight N|max | tsunamisirens on|off | tsunamiarrival N|5m|now | quakeshaking N|auto | quaketsunami yes|no | quakesirens on|off | quakefalse on|off | quakecancel N|2m | cancelalert | alertsirens on|off | strikedelay N|5m|now | tornadoef ef0-ef5 | carryview turn|still | follow on|off|distance N | seed N|lock|random | payloadsound|nukesound main|alt | flyspeed N|reset | stop | skip SECONDS | approach {} | arrival {} | colour {} | {}",
                 APPROACHES.iter().map(|a| a.key).collect::<Vec<_>>().join("|"),
                 ARRIVALS.iter().map(|a| a.key).collect::<Vec<_>>().join("|"),
                 COLOURS.iter().map(|a| a.key).collect::<Vec<_>>().join("|"),
@@ -3565,7 +3662,8 @@ mod stress {
         // its sirens on, the same: none with them off)
         let cfg = strike::ts_config();
         strike::ts_configure(strike::TsConfig { sirens: false, ..cfg });
-        for l in LASERS.iter().filter(|l| l.key != "earthquake") {
+        // (and the Tornado's: its rating and gusts as it comes down, a warning the player asked for)
+        for l in LASERS.iter().filter(|l| l.key != "earthquake" && l.key != "tornado") {
             for approach in 0..2 {
                 let plan = strike::plan(l, &target, false, "minecraft:overworld", 7.0, [10.5, 66.0, 97.0], approach);
                 assert!(!plan.iter().any(|(_, a)| matches!(a, Act::Cmd(c) if c.starts_with("title "))), "{}", l.key);
@@ -4115,6 +4213,45 @@ mod stress {
         }
     }
 
+    /// Every laser but the Earthquake and the Tsunami sounds the J-Alert's general alert from the poles round the
+    /// player as it strikes (it once came after everything else in the plan, too late to be heard).
+    #[test]
+    fn a_strike_sounds_the_general_alert_from_the_poles() {
+        let plasma = LASERS.iter().position(|l| l.key == "plasma").unwrap();
+        let mut s = Soak::new(5);
+        fake::with(|w| {
+            w.keep_commands = true;
+            w.sounds.clear();
+        });
+        s.fire(plasma, (0, 0));
+        let plan = &s.o.strike.as_ref().unwrap().plan;
+        assert!(plan.windows(2).all(|w| w[0].0 <= w[1].0), "the plan in time order");
+        for _ in 0..(12 * 20) {
+            s.step("alert");
+        }
+        let heard = fake::with(|w| w.sounds.iter().filter(|e| e.starts_with("orbital:quake.alert")).count());
+        assert!(heard >= 1, "no general alert heard: {:?}", fake::with(|w| w.sounds.iter().take(20).cloned().collect::<Vec<_>>()));
+        fake::with(|w| w.keep_commands = false);
+    }
+
+    /// Fired with a delay, a laser warns first (its countdown, the general alert), then strikes at the same target.
+    #[test]
+    fn a_delayed_strike_warns_then_strikes() {
+        let nuke = LASERS.iter().position(|l| l.key == "nuke").unwrap();
+        strike::warn_set_delay(10);
+        let mut s = Soak::new(9);
+        s.fire(nuke, (40, -20));
+        assert_eq!(s.o.strike.as_ref().map(|s| s.key), Some(WARNING));
+        assert!(s.o.strike.as_ref().unwrap().plan.iter().any(|(_, a)| matches!(a, Act::Cmd(c) if c.contains("strikes in 0:05"))));
+        for _ in 0..(11 * 20) {
+            s.step("warning");
+        }
+        let st = s.o.strike.as_ref().expect("the strike after its warning");
+        assert_eq!(st.key, "nuke");
+        assert_eq!((st.params[4].floor() as i32, st.params[5].floor() as i32), (40, -20), "at the target fired at");
+        strike::warn_set_delay(0);
+    }
+
     #[test]
     fn no_tick_overworks_through_fire_stop_and_refire() {
         let (worst, at) = soak(40, 1, 0.02);
@@ -4148,7 +4285,7 @@ mod stress {
         };
         let mut plan: Vec<(f32, Act)> = (0..60).map(|k| (0.05, Act::Later(heavy(k)))).collect();
         plan.extend((0..3000).map(|i| (0.05, Act::Cmd(format!("setblock {i} 1 1 minecraft:stone")))));
-        o.strike = Some(Strike { plan, next: 0, more: Default::default(), given: 0, ticks: 0, length: 1000.0, params: [0.0; 16], level: None, waiting: Default::default(), urgent: Default::default(), data: Vec::new(), data_sent: true, skipped: 0.0, wait: 0, sounds: Default::default(), key: "", sprites: 0, hand: None, hand_t: 0.0, tsunami_after: None });
+        o.strike = Some(Strike { plan, next: 0, more: Default::default(), given: 0, ticks: 0, length: 1000.0, params: [0.0; 16], level: None, waiting: Default::default(), urgent: Default::default(), data: Vec::new(), data_sent: true, skipped: 0.0, wait: 0, sounds: Default::default(), key: "", sprites: 0, hand: None, hand_t: 0.0, tsunami_after: None, then: None });
         let mut worst = 0;
         let mut ticks = 0;
         while o.strike.as_ref().is_some_and(|s| s.next < s.plan.len() || !s.more.is_empty() || !s.waiting.is_empty()) || !o.carving.is_empty() {

@@ -1334,7 +1334,7 @@ player, the sea's surface `SEA` (62).
   ARRIVING`, and over the hotbar the coast's gauge (the wave's height at the target over its ground, the highest so far).
   A stop or leaving the world before the hand-over drops it, and the quake's own cleanups put the sea back.
 - **The disaster-prevention radio** (`net_start`, `net_watch`, `net_heard`, `siren_pole_at`, `sirens`, `eew_alert`):
-  a network of siren poles over all the land, one in each `NET_G` (160) block square: every `NET_EVERY` (1.5 s) the
+  a network of siren poles over all the land, one in each `NET_G` (160) block square: every `NET_EVERY` (3 s) the
   squares whose middle is within `NET_R` (190) of where the player is then are surveyed round their middle (72 blocks,
   every 8) and each given its pole on the dry land nearest it (firm ground first), none if the square is all sea (asked
   again if none of it was loaded); up to four a round (iron bars and lightning-rod horns, built with the terrain on,

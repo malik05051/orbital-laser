@@ -499,6 +499,34 @@ pub const HURRICANE: Laser = Laser {
     particle_b: "particle minecraft:cloud {x} {y} {z} {r} 2 {r} 0.2 20 force",
 };
 
+/// The tornado, planned in `strike::tornado_plan` (strike/storm.rs; its funnel, track and damage in strike/vortex.rs; the
+/// pass is the Supercell's, shaders/supercell.wgsl, with no finale): no beam. A supercell's storm forms over the target,
+/// and one tornado of the EF rating picked (EF0 to EF5, the wheel's EF row) comes down out of its wall cloud and crosses
+/// the land through the target, wrecking what it crosses as its rating does. The crater fields below are only what the
+/// shared tests read.
+pub const TORNADO: Laser = Laser {
+    key: "tornado",
+    index: 20,
+    title: "TORNADO",
+    rgb: 0xC8A060,
+    blurb: "A tornado, EF0 to EF5, comes down out of a storm and crosses the land.",
+    icon_model: "orbital:tornado_icon",
+    length: 64.0,
+    range: 1000.0,
+    scorch: &[],
+    bowl_r: 10,
+    bowl_d: 2,
+    bowl_rough: 0.1,
+    shaft_r: 0,
+    shaft_min: 0,
+    shaft_rough: 0.0,
+    lining: &[("minecraft:coarse_dirt", 1.0)],
+    bowl_floor: ("minecraft:coarse_dirt", 0.0, "minecraft:dirt"),
+    bottom: &[],
+    particle_a: "particle minecraft:large_smoke {x} {y} {z} {r} 2 {r} 0.02 20 force",
+    particle_b: "particle minecraft:cloud {x} {y} {z} {r} 2 {r} 0.2 20 force",
+};
+
 /// The tsunami, planned in `strike::tsunami_plan` (strike/tsunami.rs; the pass shaders/tsunami.wgsl): no beam. A wave of
 /// dark, debris-laden water 320 blocks high rises on the horizon beyond the target, crosses the land and sweeps it clean,
 /// washes over the player and drains away, leaving mud and wreckage. The crater fields below are only what the shared
@@ -662,7 +690,7 @@ pub const EARTHQUAKE: Laser = Laser {
     particle_b: "particle minecraft:campfire_cosy_smoke {x} {y} {z} {r} 1 {r} 0.01 6 force",
 };
 
-pub const LASERS: [&Laser; 20] = [&PLASMA, &GODLY, &BLACK_HOLE, &METEOR, &MOTHERSHIP, &DOWNFALL, &PLANET_KILLER, &CRYSTAL_BLOOM, &SINKHOLE, &PAYLOAD, &NUKE, &ROD, &SUPERCELL, &HURRICANE, &TSUNAMI, &FOLD, &SUPERVOLCANO, &SKYBREAK, &CARPET_BOMB, &EARTHQUAKE];
+pub const LASERS: [&Laser; 21] = [&PLASMA, &GODLY, &BLACK_HOLE, &METEOR, &MOTHERSHIP, &DOWNFALL, &PLANET_KILLER, &CRYSTAL_BLOOM, &SINKHOLE, &PAYLOAD, &NUKE, &ROD, &SUPERCELL, &HURRICANE, &TORNADO, &TSUNAMI, &FOLD, &SUPERVOLCANO, &SKYBREAK, &CARPET_BOMB, &EARTHQUAKE];
 
 /// The ship lasers: they share the mothership's arrival and its approach and arrival choices.
 pub fn is_ship(l: &Laser) -> bool {

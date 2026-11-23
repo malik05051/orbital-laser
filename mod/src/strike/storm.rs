@@ -59,7 +59,7 @@ pub(super) const SC_B: usize = 16;
 pub(super) const SC_BW: usize = 4;
 pub(super) const SC_F: usize = SC_B + SC_BW * SC_NB;
 pub(super) const SC_NF: usize = 3;
-pub(super) const SC_K: usize = 1024;
+pub(super) const SC_K: usize = SC_F + VX_W * SC_NF;
 pub(super) const SC_I: usize = SC_K + 3 * SC_NK;
 pub(super) const SC_NI: usize = 64;
 /// How far out it works in the land (the chunks forceloaded for it).
@@ -203,13 +203,16 @@ pub(super) fn sc_funnels(seed: u32) -> Vec<Funnel> {
 /// The pass's table for strike `seed` (the player at `me`, off the middle), the ground under each bolt and funnel's
 /// track as `dy` says (None: not known yet, taken as the middle's).
 pub(super) fn sc_table(seed: u32, me: [f64; 2], dy: &dyn Fn(f64, f64) -> Option<f64>) -> Vec<u32> {
-    let bolts = sc_bolts(seed, me);
-    let funnels = sc_funnels(seed);
-    let flick = sc_flickers(seed);
+    sc_table_of(&sc_bolts(seed, me), &sc_funnels(seed), &sc_flickers(seed), SC_FINALE, 0.0, dy)
+}
+/// The pass's table for these bolts, funnels and flickers, its finale at `finale` (far off: none, the Tornado's) and the
+/// storm lasting `life` seconds (0: the Supercell's own).
+pub(super) fn sc_table_of(bolts: &[Bolt], funnels: &[Funnel], flick: &[[f32; 3]], finale: f32, life: f32, dy: &dyn Fn(f64, f64) -> Option<f64>) -> Vec<u32> {
     let mut w = vec![0u32; SC_I + SC_NI];
     let f = |v: f64| (v as f32).to_bits();
     w[0] = f(bolts.len() as f64);
-    w[1] = SC_FINALE.to_bits();
+    w[1] = finale.to_bits();
+    w[5] = life.to_bits();
     w[2] = f(funnels.len() as f64);
     w[3] = f(flick.len() as f64);
     w[4] = f(dy(0.0, 0.0).unwrap_or(0.0));
@@ -812,6 +815,196 @@ pub(super) fn supercell_plan(laser: &'static Laser, target: &Target, terrain: bo
     p.ev
 }
 
+// ---- the Tornado ------------------------------------------------------------------------------------------------------
+/// A rating on the Enhanced Fujita scale (the NWS's: its 3-second gust, estimated from the worst damage along the
+/// path), and how the Tornado plays it: its touch radius (blocks; tornadoes rated higher are wider, EF2 to EF5 some
+/// 400 m on average and the widest kilometres, here scaled down to what the game's edits allow) and its foot's speed.
+pub struct Ef {
+    pub name: &'static str,
+    /// The NWS's word for it.
+    pub label: &'static str,
+    /// Its 3-second gust, mph and km/h (the top none for EF5: over 200 mph).
+    pub mph: (u32, Option<u32>),
+    pub kmh: (u32, Option<u32>),
+    /// What it does, in a line (the wheel's hint).
+    pub damage: &'static str,
+    pub touch_r: f64,
+}
+pub const TORNADO_EF: [Ef; 6] = [
+    Ef { name: "EF0", label: "Gale", mph: (65, Some(85)), kmh: (105, Some(137)), damage: "branches broken, roofs peeled, shallow trees down", touch_r: 5.0 },
+    Ef { name: "EF1", label: "Moderate", mph: (86, Some(110)), kmh: (138, Some(177)), damage: "roofs stripped, windows broken, doors torn off", touch_r: 8.0 },
+    Ef { name: "EF2", label: "Significant", mph: (111, Some(135)), kmh: (178, Some(217)), damage: "roofs torn off, big trees snapped", touch_r: 12.0 },
+    Ef { name: "EF3", label: "Severe", mph: (136, Some(165)), kmh: (218, Some(266)), damage: "walls down, trees uprooted, stone roofs off", touch_r: 17.0 },
+    Ef { name: "EF4", label: "Devastating", mph: (166, Some(200)), kmh: (267, Some(322)), damage: "well-built houses levelled", touch_r: 23.0 },
+    Ef { name: "EF5", label: "Incredible", mph: (201, None), kmh: (323, None), damage: "houses swept away, the ground scoured", touch_r: 30.0 },
+];
+impl Ef {
+    /// Its gusts as the wheel and the hotbar say them: "136-165 mph (218-266 km/h)", "200+ mph (322+ km/h)".
+    pub fn gusts(&self) -> String {
+        match (self.mph.1, self.kmh.1) {
+            (Some(a), Some(b)) => format!("{}-{a} mph ({}-{b} km/h)", self.mph.0, self.kmh.0),
+            _ => format!("{}+ mph ({}+ km/h)", self.mph.0 - 1, self.kmh.0 - 1),
+        }
+    }
+}
+/// The Tornado's timeline: its funnel starts down out of the wall cloud at TR_DOWN and is on the land for as long as
+/// the pass's table holds its track (vortex.rs's VX_S samples), crossing the target about half way; the storm gone by
+/// TR_LEN (lasers.rs's length).
+pub(super) const TR_DOWN: f64 = 9.0;
+pub(super) const TR_LEN: f32 = 64.0;
+/// Its foot's speed over the land (blocks a second), and how far round the target the land is kept loaded.
+const TR_SPEED: f64 = 7.0;
+const TR_LOAD: f64 = 200.0;
+
+/// The Tornado's funnel for strike `seed`, rated `ef`, the player at `me` off the middle: it crosses the target about
+/// half way through its time on the land, on a way 35 to 70 degrees off the one to the player (passing beside them, not
+/// straight at them), weaving a little.
+pub(super) fn tr_funnel(seed: u32, me: [f64; 2], ef: usize) -> Funnel {
+    let e = &TORNADO_EF[ef.min(5)];
+    let to_me = me[1].atan2(me[0]);
+    let side = if mh(0, seed, 0x7c) < 0.5 { -1.0 } else { 1.0 };
+    let h = to_me + side * (35.0 + 35.0 * mh(1, seed, 0x7c)).to_radians();
+    let half = (vortex::VX_S - 1) as f64 * vortex::VX_DT / 2.0;
+    let start = [-h.cos() * TR_SPEED * half, -h.sin() * TR_SPEED * half];
+    vortex::track(seed, start, h, TR_SPEED, 6.0 + 0.3 * e.touch_r, TR_DOWN, e.touch_r)
+}
+/// The columns whose ground the pass needs: under its track (and the middle), and the few bolts.
+fn tr_columns(seed: u32, me: [f64; 2], ef: usize, bolts: &[Bolt], bx: i32, bz: i32) -> Vec<(i32, i32)> {
+    let c = |x: f64, z: f64| ((f64::from(bx) + 0.5 + x).floor() as i32, (f64::from(bz) + 0.5 + z).floor() as i32);
+    let mut out = vec![(bx, bz)];
+    out.extend(bolts.iter().map(|b| c(b.x, b.z)));
+    for p in &tr_funnel(seed, me, ef).path {
+        out.extend(vortex::VX_PROBE.iter().map(|&(dx, dz)| c(p[0] + f64::from(dx), p[1] + f64::from(dz))));
+    }
+    out
+}
+/// The Tornado's bolts: a few of the storm's flurry, before its funnel comes down.
+fn tr_bolts(seed: u32, me: [f64; 2]) -> Vec<Bolt> {
+    sc_bolts(seed, me).into_iter().filter(|b| b.t < SC_WAVES).step_by(2).collect()
+}
+
+/// The Tornado: a supercell's storm forming over the target (supercell.wgsl draws it, its finale left out), and out of
+/// its wall cloud one tornado of EF rating `ef` coming down onto the land, crossing it through the target and roping
+/// out; with the terrain on, wrecking what it crosses as its rating does (`vortex::wreck`). Its roar where it is,
+/// louder and deeper the stronger; with the knockback on it throws the player near it; mobs caught in it hurt (EF1 on).
+/// The J-Alert's general alert is lib.rs's, as every laser's.
+pub(super) fn tornado_plan(laser: &'static Laser, target: &Target, terrain: bool, _dimension: &str, shader_seed: f32, me: [f64; 3], ef: usize) -> Vec<(f32, Act)> {
+    let [bx, by, bz] = target.block;
+    let seed = (bx as i64).wrapping_mul(73_856_093) ^ (bz as i64).wrapping_mul(19_349_663) ^ by as i64;
+    let mut p = Plan { laser, ev: Vec::new(), rng: Rng::new(seed as u64), bx, by, bz };
+    let s = shader_seed as u32;
+    let ef = ef.min(5);
+    let e = &TORNADO_EF[ef];
+    let (cx, cz) = (f64::from(bx) + 0.5, f64::from(bz) + 0.5);
+    let gy = f64::from(by) + 1.0;
+    let mer = [me[0] - cx, me[2] - cz];
+    let len = laser.length;
+    let funnel = Rc::new(tr_funnel(s, mer, ef));
+    let bolts = tr_bolts(s, mer);
+    let flick: Vec<[f32; 3]> = sc_flickers(s).into_iter().step_by(2).collect();
+    let snd = |p: &mut Plan, t: f32, role: &str, vol: f32, pitch: f32| p.ev.push((t, Act::Sound { event: format!("orbital:supercell.{role}"), at: None, volume: (vol / 10.0).min(1.0), pitch }));
+
+    // ---- the pass's table, and the ground under the track asked of the world, put in when answered -----------------
+    {
+        let (fu, bo, fl) = (funnel.clone(), bolts.clone(), flick.clone());
+        p.later(0.05, move |q| q.ev.push((0.05, Act::Table(sc_table_of(&bo, &[(*fu).clone()], &fl, 1.0e6, TR_LEN, &|_, _| None)))));
+    }
+    for (ask, put) in [(0.1f32, 1.0f32), (5.0, 6.5), (14.0, 15.5)] {
+        let tag = crate::ground::new_tag();
+        let bo = bolts.clone();
+        p.later(ask, move |q| {
+            let columns = tr_columns(s, mer, ef, &bo, q.bx, q.bz);
+            q.ev.push((ask, Act::Survey { tag, columns }));
+        });
+        let (fu, bo, fl) = (funnel.clone(), bolts.clone(), flick.clone());
+        p.later(put, move |q| {
+            let (bx, by, bz) = (q.bx, q.by, q.bz);
+            let w = sc_table_of(&bo, &[(*fu).clone()], &fl, 1.0e6, TR_LEN, &|x, z| ground_dy(bx, by, bz, x, z));
+            q.ev.push((put, Act::Words { index: 0, words: w }));
+        });
+    }
+
+    // ---- the storm: the sky darkening, the wind, the rain, thunder now and then ------------------------------------------
+    snd(&mut p, 0.0, "buildup", 10.0, 1.0);
+    let mut t = 4.5f32;
+    while t < len - 6.0 {
+        snd(&mut p, t, "gusts", 5.0 + 0.4 * ef as f32, 0.95 - 0.02 * ef as f32);
+        t += 9.5;
+    }
+    let mut t = 4.0f32;
+    while t < len - 8.0 {
+        snd(&mut p, t, "rain", 5.5, 1.0);
+        t += 9.0;
+    }
+    for h in sc_thunder(s, &bolts, me, [cx, gy, cz], (1.0e6, 1.0e6)) {
+        snd(&mut p, h.at, &h.event, 10.0 * h.volume, h.pitch);
+    }
+
+    // ---- the warning on the screen, as it comes down: its rating, its gusts --------------------------------------------
+    let td = TR_DOWN as f32;
+    p.at(td, "title @s times 10 60 20");
+    p.at(td, format!(r##"title @s subtitle {{"text":"{}  ·  {}  ·  take cover","color":"#FF8A3D"}}"##, e.name, e.label));
+    p.at(td, r##"title @s title {"text":"TORNADO","color":"#FF5A3D"}"##);
+    let mut t = td + 4.0;
+    while t < funnel.t1 as f32 {
+        p.at(t, format!(r##"title @s actionbar {{"text":"TORNADO  ·  {}  ·  {}  ·  {}","color":"#FF8A3D"}}"##, e.name, e.gusts(), e.label));
+        t += 2.0;
+    }
+
+    // ---- the tornado: its roar where it is, its push and its hurt near it, and with the terrain on what it wrecks -------
+    {
+        let fr = funnel.clone();
+        p.later(funnel.t0 as f32 - 0.5, move |q| {
+            let (bx, by, bz) = (q.bx, q.by, q.bz);
+            let track = vortex::ground_track(&fr.path, |x, z| ground_dy(bx, by, bz, x, z));
+            vortex::roar_as(q, &fr, "orbital:supercell.roar", [cx, gy, cz], &track, 1.0 + 0.6 * ef as f32, 1.0 - 0.05 * ef as f32);
+        });
+    }
+    let mut t = funnel.t0 + vortex::VX_DOWN;
+    while t < funnel.t1 - vortex::VX_LIFT {
+        let [fx, fz] = funnel.at(t);
+        let (x, z) = (cx + fx, cz + fz);
+        // (the ground trembling under it, more the nearer it is to where the player fired from and the stronger it is)
+        let d = (x - me[0]).hypot(z - me[2]);
+        let near = (1.0 - d / (220.0 + 20.0 * ef as f64)).max(0.0) as f32;
+        if near > 0.0 {
+            p.shake(t as f32, (0.04 + 0.06 * ef as f32) * near * near + 0.02, 0.6);
+        }
+        p.ev.push((t as f32, Act::Shove { from: [x, gy, z], out: 0.3 + 0.12 * ef as f32, up: 0.25 + 0.1 * ef as f32, reach: (1.5 * e.touch_r + 6.0) as f32 }));
+        if ef >= 1 && ((t * 2.0).round() as i64) % 2 == 0 {
+            let reach = e.touch_r * 1.1;
+            p.at(t as f32, format!("execute positioned {x:.1} 0 {z:.1} positioned over motion_blocking as @e[type=!minecraft:player,distance=..{reach:.0}] run damage @s {} minecraft:generic", 2 + 3 * ef));
+        }
+        t += 0.5;
+    }
+    if terrain {
+        // (a stage at a time from just before it touches down, as much as a tick allows: `vortex::wreck_stage`)
+        let w = Rc::new(std::cell::RefCell::new(vortex::Wreck::new(funnel.clone(), bx, bz, s ^ 0x70a, ef as u8)));
+        let start = funnel.t0 + vortex::VX_DOWN * 0.7;
+        p.later(start as f32, move |q| vortex::wreck_stage(q, w, start));
+        let load = pk_load_rows([cx, gy, cz], 0.0, TR_LOAD);
+        for [x0, z0, x1, z1] in &load {
+            p.at(0.0, format!("forceload add {x0} {z0} {x1} {z1}"));
+        }
+        for [x0, z0, x1, z1] in &load {
+            p.ev.push((len - 0.5, Act::Spare(format!("forceload remove {x0} {z0} {x1} {z1}"))));
+        }
+    }
+    p.ev.sort_by(|a, b| a.0.total_cmp(&b.0));
+    p.ev
+}
+
+thread_local! {
+    static RATING: std::cell::Cell<usize> = const { std::cell::Cell::new(3) };
+}
+/// The Tornado's rating for the next strike (`/orbital tornadoef`, the wheel's EF row; kept): 0 to 5.
+pub fn tornado_ef() -> usize {
+    RATING.with(std::cell::Cell::get)
+}
+pub fn set_tornado_ef(ef: usize) {
+    RATING.with(|r| r.set(ef.min(5)));
+}
+
 #[cfg(test)]
 mod table {
     /// `CB_SEED=37 CB_OUT=path PL_ME=x,y,z cargo test --release sc_write_table -- --ignored`: the table the pass reads, for
@@ -1174,5 +1367,88 @@ fn sc_fire_cost() {
         let spent = crate::meter::spent();
         println!("terrain {terrain}: plan {:.2}M on the meter, {:?}, {} acts", spent as f64 / 1e6, t.elapsed(), ev.len());
         assert!(spent < 2_000_000, "the plan took {:.2}M", spent as f64 / 1e6);
+    }
+}
+
+#[cfg(test)]
+mod tornado_tests {
+    use super::*;
+
+    /// A plan's edits as the fills they make.
+    fn fills(plan: &[(f32, Act)]) -> Vec<String> {
+        plan.iter().filter_map(|(_, a)| if let Act::Blocks(b) = a { Some(b.as_fills()) } else { None }).flatten().collect()
+    }
+
+    #[test]
+    fn a_tornado_crosses_the_target_and_wrecks_by_its_rating() {
+        let target = Target { block: [0, 64, 0], point: [0.5, 65.0, 0.5] };
+        let laser = crate::lasers::LASERS.iter().find(|l| l.key == "tornado").expect("the tornado");
+        assert_eq!(laser.length, TR_LEN);
+        let me = [150.5, 66.0, 90.5];
+        let mut widths = Vec::new();
+        for ef in 0..6 {
+            let f = tr_funnel(7, [150.0, 90.0], ef);
+            // (it crosses the target about half way, and lives under the storm's time)
+            let nearest = f.path.iter().map(|p| p[0].hypot(p[1])).fold(f64::MAX, f64::min);
+            assert!(nearest < f.touch_r.max(8.0), "EF{ef} passes {nearest:.1} off the target");
+            assert!(f.t1 < f64::from(TR_LEN) - 2.0 && f.path.len() == vortex::VX_S);
+            // (never straight at the player: at least 30 degrees off)
+            let h = (f.path[1][1] - f.path[0][1]).atan2(f.path[1][0] - f.path[0][0]);
+            let to_me = 90.0f64.atan2(150.0);
+            let off = ((h - to_me + PI).rem_euclid(2.0 * PI) - PI).abs();
+            assert!(off > 0.5, "EF{ef} heads {off:.2} rad off the player");
+            widths.push(f.touch_r);
+            // the plan: its table (no finale, the storm 64 s), the push near it, no edit with the terrain off
+            let plan = tornado_plan(laser, &target, false, "minecraft:overworld", 7.0, me, ef);
+            assert!(plan.iter().all(|(t, _)| *t <= TR_LEN));
+            assert!(plan.iter().any(|(_, a)| matches!(a, Act::Shove { .. })));
+            assert!(plan.iter().all(|(_, a)| !matches!(a, Act::Blocks(_))));
+            assert!(plan.iter().any(|(_, a)| matches!(a, Act::Cmd(c) if c.contains(TORNADO_EF[ef].name) && c.contains("actionbar"))));
+            assert_eq!(plan.iter().any(|(_, a)| matches!(a, Act::Cmd(c) if c.contains("run damage"))), ef >= 1);
+        }
+        assert!(widths.windows(2).all(|w| w[0] < w[1]), "wider the stronger: {widths:?}");
+        // the table: no finale, the storm lasting the strike, the funnel's words in
+        let f = tr_funnel(7, [150.0, 90.0], 3);
+        let w = sc_table_of(&[], &[f.clone()], &[], 1.0e6, TR_LEN, &|_, _| None);
+        assert_eq!(f32::from_bits(w[1]), 1.0e6);
+        assert_eq!(f32::from_bits(w[5]), TR_LEN);
+        assert_eq!(f32::from_bits(w[2]), 1.0);
+        assert_eq!(f32::from_bits(w[SC_F + 3]) as f64, f.touch_r);
+        // what it wrecks, by its rating: EF0 the plants and leaves only; EF2 the wooden roofs; EF5 the stone houses too
+        let wreck_of = |ef: u8| {
+            let f = Rc::new(tr_funnel(7, [150.0, 90.0], usize::from(ef)));
+            let w = Rc::new(std::cell::RefCell::new(vortex::Wreck::new(f.clone(), 0, 0, 3, ef)));
+            let mut q = Plan { laser, ev: Vec::new(), rng: Rng::new(1), bx: 0, by: 64, bz: 0 };
+            // (its stages played out as the strike would, each one no more than its budget)
+            let start = f.t0;
+            let mut out: Vec<(f32, Act)> = Vec::new();
+            q.later(start as f32, move |q| vortex::wreck_stage(q, w, start));
+            let mut todo = std::mem::take(&mut q.ev);
+            let mut stages = 0;
+            while let Some((_, a)) = todo.pop() {
+                match a {
+                    Act::Later(job) => {
+                        crate::meter::reset();
+                        let more = job();
+                        assert!(crate::meter::spent() < 2 * 5_000_000, "EF{ef}: a stage of {}", crate::meter::spent());
+                        todo.extend(more);
+                        stages += 1;
+                        assert!(stages < 2000, "EF{ef}: it never ends");
+                    }
+                    a => out.push((0.0, a)),
+                }
+            }
+            (fills(&out), out.iter().filter(|(_, a)| matches!(a, Act::Cmd(c) if c.contains("falling_block"))).count())
+        };
+        let (ef0, thrown0) = wreck_of(0);
+        assert!(ef0.iter().any(|c| c.contains("#minecraft:leaves")) && !ef0.iter().any(|c| c.contains("planks") || c.contains("glass")));
+        let (ef2, _) = wreck_of(2);
+        assert!(ef2.iter().any(|c| c.contains("#minecraft:wooden_stairs")) && !ef2.iter().any(|c| c.contains("minecraft:cobblestone")));
+        let (ef5, thrown5) = wreck_of(5);
+        assert!(ef5.iter().any(|c| c.contains("minecraft:cobblestone")) && ef5.iter().any(|c| c.contains("#minecraft:stone_bricks")));
+        assert!(thrown5 > thrown0, "more thrown the stronger: {thrown0} {thrown5}");
+        // (the gusts as said: the NWS's 3-second gusts)
+        assert_eq!(TORNADO_EF[3].gusts(), "136-165 mph (218-266 km/h)");
+        assert_eq!(TORNADO_EF[5].gusts(), "200+ mph (322+ km/h)");
     }
 }

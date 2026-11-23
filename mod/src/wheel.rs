@@ -84,6 +84,13 @@ fn crease_button(k: usize) -> Rect {
     let x = -w / 2.0 + CREASE_LABEL_W + CREASE_W[..k].iter().sum::<f32>() + BTN_GAP * k as f32;
     Rect { x, y: ROW_Y, w: CREASE_W[k], h: BTN_H }
 }
+/// The Tornado's row: its label, then a button an EF rating, EF0 to EF5 (`strike::TORNADO_EF`).
+const EF_LABEL_W: f32 = 40.0;
+const EF_W: f32 = 26.0;
+fn ef_button(k: usize) -> Rect {
+    let w = EF_LABEL_W + 6.0 * EF_W + BTN_GAP * 5.0;
+    Rect { x: -w / 2.0 + EF_LABEL_W + k as f32 * (EF_W + BTN_GAP), y: ROW_Y, w: EF_W, h: BTN_H }
+}
 /// The Earthquake's preset's row: its label, then a button a historic earthquake (strike::QK_PRESETS), as wide as its
 /// name.
 const QUAKE_LABEL_W: f32 = 38.0;
@@ -266,6 +273,12 @@ fn impact_button(k: usize) -> Rect {
 const FLY_Y: f32 = -R_OUT - 52.0;
 const BAR: Rect = Rect { x: -56.0, y: FLY_Y, w: 106.0, h: 12.0 };
 const FIELD: Rect = Rect { x: 56.0, y: FLY_Y, w: 40.0, h: 12.0 };
+/// The time before a strike (`strike::warn_delay`, `/orbital strikedelay`): DELAY - NOW +, at the right end of the flying
+/// speed's row, for every laser (the Tsunami has its own ARRIVAL).
+const DELAY_BOX: Rect = Rect { x: 104.0, y: FLY_Y - 3.0, w: 100.0, h: BAR.h + 6.0 };
+const DELAY_DOWN: Rect = Rect { x: 140.0, y: FLY_Y, w: 11.0, h: 12.0 };
+const DELAY_VALUE: Rect = Rect { x: 154.0, y: FLY_Y, w: 32.0, h: 12.0 };
+const DELAY_UP: Rect = Rect { x: 189.0, y: FLY_Y, w: 11.0, h: 12.0 };
 /// The bar's top speed and the highest a typed one may be, in times vanilla's.
 pub const BAR_MAX: f32 = 40.0;
 pub const FLY_MAX: f32 = 1000.0;
@@ -305,6 +318,10 @@ pub enum Spot {
     CancelAlert,
     /// The Tsunami's row: its first wave's arrival after the warning a step earlier or later.
     TsArrival(i8),
+    /// The time before every laser strikes (its warning), a step shorter or longer.
+    Delay(i8),
+    /// The Tornado's row: its EF rating (0 to 5).
+    Tornado(usize),
     /// One of the ship's approaches (strike::APPROACHES), or ways of arriving (strike::ARRIVALS).
     Approach(usize),
     Arrival(usize),
@@ -330,6 +347,7 @@ pub enum Rows {
     Crease,
     Quake,
     Tsunami,
+    Tornado,
 }
 impl Rows {
     /// The rows laser `i` has (if any).
@@ -342,6 +360,7 @@ impl Rows {
             Some(l) if l.key == "fold" => Rows::Crease,
             Some(l) if l.key == "earthquake" => Rows::Quake,
             Some(l) if l.key == "tsunami" => Rows::Tsunami,
+            Some(l) if l.key == "tornado" => Rows::Tornado,
             _ => Rows::None,
         }
     }
@@ -497,7 +516,7 @@ pub fn toggles(i: usize) -> Vec<(Rect, Spot)> {
     let key = LASERS[i].key;
     let mut at = [KNOCK, FOLLOW].into_iter();
     let mut out = Vec::new();
-    if key == "nuke" || key == "rod" || key == "hurricane" || key == "tsunami" || key == "fold" || key == "supervolcano" || key == "carpetbomb" || key == "earthquake" {
+    if key == "nuke" || key == "rod" || key == "hurricane" || key == "tornado" || key == "tsunami" || key == "fold" || key == "supervolcano" || key == "carpetbomb" || key == "earthquake" {
         out.push((at.next().unwrap_or(KNOCK), Spot::Knock));
     }
     if key == "nuke" || key == "payload" {
@@ -523,6 +542,12 @@ pub fn spot(x: f32, y: f32, rows: impl Into<Rows>, page: usize) -> Option<Spot> 
     }
     if inside(&FIELD, x, y) {
         return Some(Spot::FlyField);
+    }
+    if inside(&DELAY_DOWN, x, y) {
+        return Some(Spot::Delay(-1));
+    }
+    if inside(&DELAY_UP, x, y) {
+        return Some(Spot::Delay(1));
     }
     if rows == Rows::Sound {
         for k in 0..SOUNDS.len() {
@@ -566,6 +591,13 @@ pub fn spot(x: f32, y: f32, rows: impl Into<Rows>, page: usize) -> Option<Spot> 
                     QkPiece::Switch(f) => return Some(Spot::QkStep(f, 1)),
                     _ => {}
                 }
+            }
+        }
+    }
+    if rows == Rows::Tornado {
+        for k in 0..6 {
+            if inside(&ef_button(k), x, y) {
+                return Some(Spot::Tornado(k));
             }
         }
     }
@@ -874,6 +906,23 @@ impl Wheel {
                 text(&mut out, p.1, b.x + b.w / 2.0, b.y + 2.0, if chosen || hovered { ms.rgb } else { 0x9AA2AE });
             }
         }
+        // (the Tornado's: its EF rating, the next strike's)
+        if let Some(rl) = row.filter(|&i| LASERS[i].key == "tornado") {
+            let ms = LASERS[rl];
+            let b0 = ef_button(0);
+            text(&mut out, "RATING", b0.x - EF_LABEL_W / 2.0 - 2.0, b0.y + 2.0, 0xB8BEC8);
+            let ef = crate::strike::tornado_ef();
+            for (k, e) in crate::strike::TORNADO_EF.iter().enumerate() {
+                let b = ef_button(k);
+                let chosen = k == ef;
+                let hovered = self.hover == Some(Spot::Tornado(k));
+                out.push(Draw::Fill((b, if hovered { argb(0xE6, shade(ms.rgb, 0.42)) } else { 0xE0101318 })));
+                let rim = if chosen { 2.0 } else { 1.0 };
+                let rim_c = if chosen { argb(0xFF, ms.rgb) } else { argb(0x90, shade(ms.rgb, 0.6)) };
+                out.push(Draw::Fill((Rect { x: b.x, y: b.y + b.h - rim, w: b.w, h: rim }, rim_c)));
+                text(&mut out, e.name, b.x + b.w / 2.0, b.y + 2.0, if chosen || hovered { ms.rgb } else { 0x9AA2AE });
+            }
+        }
         // (the Tsunami's: its wave's height and its sirens, for the next one fired on its own)
         if let Some(rl) = row.filter(|&i| LASERS[i].key == "tsunami") {
             let ms = LASERS[rl];
@@ -1038,6 +1087,10 @@ impl Wheel {
             Some(Spot::Impact(2)) => ("Black Flash: red and black, black lightning".to_string(), 0x8C93A0),
             Some(Spot::Impact(_)) => ("Cinematic: a white-out and a shockwave ring".to_string(), 0x8C93A0),
             Some(Spot::Crease(k)) => (FD_PATTERNS[k.min(2)].2.to_string(), 0x8C93A0),
+            Some(Spot::Tornado(k)) => {
+                let e = &crate::strike::TORNADO_EF[k.min(5)];
+                (format!("{} {}: {}", e.name, e.label, e.gusts()), 0x8C93A0)
+            }
             Some(Spot::Quake(k)) => {
                 let q = qk_quake(k.min(QK_CUSTOM));
                 (format!("{}, Mw {:.1}, Shindo {}{}{}", q.name, q.mw, q.top_class(), if q.estimated { " est." } else { "" }, if q.tsunami.is_some() { ", tsunami" } else { "" }), 0x8C93A0)
@@ -1062,6 +1115,7 @@ impl Wheel {
             Some(Spot::TsSirens) => ("J-Alert siren poles warn of the wave (heard near them)".to_string(), 0x8C93A0),
             Some(Spot::TsArrival(_)) => ("First wave after the warning: NOW, or 1 to 30 min".to_string(), 0x8C93A0),
             Some(Spot::CancelAlert) => ("Cancel the false alert now: its cancellation plays".to_string(), 0x8C93A0),
+            Some(Spot::Delay(_)) => ("Time before it strikes (warning first): NOW to 30m".to_string(), 0x8C93A0),
             Some(Spot::Knock) => ("Push on you: thrown by blasts, waves and Shindo 6+ shaking".to_string(), 0x8C93A0),
             Some(Spot::Follow) => ("Camera chases the Nuke's or Payload's bomb down".to_string(), 0x8C93A0),
             Some(Spot::Gravity) => ("After the strike, blocks left hanging fall (terrain on)".to_string(), 0x8C93A0),
@@ -1125,6 +1179,18 @@ impl Wheel {
             None => (speed_label(self.fly), ACCENT),
         };
         text(out, &shown, FIELD.x + FIELD.w / 2.0, FIELD.y + 2.0, colour);
+        // the time before a strike: DELAY - NOW +, lit amber while one is set
+        let d = crate::strike::warn_delay();
+        out.push(Draw::Fill((DELAY_BOX, 0xB0101318)));
+        text(out, "DELAY", DELAY_BOX.x + 17.0, FLY_Y + 2.0, 0xB8BEC8);
+        for (b, dir) in [(DELAY_DOWN, -1i8), (DELAY_UP, 1)] {
+            let hovered = self.hover == Some(Spot::Delay(dir));
+            out.push(Draw::Fill((b, if hovered { 0xF0262A31 } else { 0xE0181C22 })));
+            text(out, if dir < 0 { "-" } else { "+" }, b.x + b.w / 2.0, b.y + 2.0, if hovered { 0xF0C060 } else { 0xB8BEC8 });
+        }
+        out.push(Draw::Fill((DELAY_VALUE, 0xE0101318)));
+        out.push(Draw::Fill((Rect { x: DELAY_VALUE.x, y: DELAY_VALUE.y + DELAY_VALUE.h - 1.5, w: DELAY_VALUE.w, h: 1.5 }, if d > 0 { 0xFFE8B04A } else { 0x905A6070 })));
+        text(out, &crate::strike::warn_delay_text(d), DELAY_VALUE.x + DELAY_VALUE.w / 2.0, DELAY_VALUE.y + 2.0, if d > 0 { 0xF0C060 } else { 0x9AA2AE });
     }
 
     /// The page arrows either side of the ring, and the numbered tabs over it, the page shown lit (in the loaded laser's
@@ -1179,20 +1245,22 @@ mod tests {
     }
     #[test]
     fn the_fold_and_the_sky_breaks_are_on_the_fourth_page() {
-        assert_eq!(pages(), 4);
+        assert_eq!(pages(), 5);
+        let tornado = LASERS.iter().position(|l| l.key == "tornado").expect("the Tornado");
+        assert_eq!(LASERS[tornado - 1].key, "hurricane", "next to the Hurricane");
         let fold = LASERS.iter().position(|l| l.key == "fold").expect("the Fold");
         assert_eq!(page_of(fold), 3);
         let sb = LASERS.iter().position(|l| l.key == "skybreak").expect("the Sky Breaks");
         assert_eq!(page_of(sb), 3);
         let cp = LASERS.iter().position(|l| l.key == "carpetbomb").expect("the Carpet Bomb");
-        assert_eq!((cp, page_of(cp)), (18, 3));
+        assert_eq!((cp, page_of(cp)), (19, 3));
         let eq = LASERS.iter().position(|l| l.key == "earthquake").expect("the Earthquake");
-        assert_eq!((eq, page_of(eq)), (19, 3));
+        assert_eq!((eq, page_of(eq)), (20, 4));
         // (its QUAKE row's buttons side by side, none over another)
         for k in 1..=QK_CUSTOM {
             assert!(quake_button(k - 1).x + quake_button(k - 1).w < quake_button(k).x);
         }
-        assert_eq!(tab(3).x + tab(3).w, -tab(0).x, "the four tabs centred over the ring");
+        assert_eq!(tab(4).x + tab(4).w, -tab(0).x, "the five tabs centred over the ring");
     }
 
     #[test]
@@ -1303,6 +1371,18 @@ mod tests {
         w.hover_at(STOP_HALF.x + 4.0, STOP_HALF.y + 4.0, quake);
         assert_eq!(w.hover, Some(Spot::Stop));
         assert!(CANCEL.x + CANCEL.w <= STOP.x + STOP.w + 0.01 && STOP_HALF.x + STOP_HALF.w < CANCEL.x);
+    }
+    #[test]
+    fn the_delay_sits_by_the_flying_speed_inside_the_window_and_clicks() {
+        let apart = |a: &Rect, b: &Rect| a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+        for b in [DELAY_BOX, DELAY_DOWN, DELAY_VALUE, DELAY_UP] {
+            assert!(b.x >= -240.0 && b.x + b.w <= 240.0 && b.y >= -135.0, "{b:?}");
+            assert!(apart(&b, &FIELD) && apart(&b, &HUD) && apart(&b, &BAR), "{b:?}");
+        }
+        for (b, d) in [(DELAY_DOWN, -1), (DELAY_UP, 1)] {
+            assert_eq!(spot(b.x + b.w / 2.0, b.y + b.h / 2.0, Rows::None, 0), Some(Spot::Delay(d)));
+        }
+        assert_eq!(spot(DELAY_VALUE.x + 4.0, DELAY_VALUE.y + 4.0, Rows::None, 0), None);
     }
     #[test]
     fn pages_turn() {

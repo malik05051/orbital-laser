@@ -176,6 +176,16 @@ Twenty lasers, five to a page of the wheel.
   in them. **Photosensitivity:** its lightning is bright flashes over much of the picture, in bursts at about 16-28 and
   43-46 seconds.
 
+- **Tornado** (page three, next to the Hurricane). A supercell's storm forms over the target, and one tornado comes
+  down out of its wall cloud and crosses the land through the target, roping out a minute later. Pick its strength on
+  the wheel's RATING row or with `/orbital tornadoef ef0`–`ef5`, by the Enhanced Fujita scale's 3-second gusts:
+  EF0 65–85 mph (105–137 km/h), EF1 86–110, EF2 111–135, EF3 136–165, EF4 166–200, EF5 over 200 mph (322 km/h). The
+  stronger it is, the wider it is, louder and deeper its roar, and the more it wrecks as the scale's damage goes:
+  EF0 strips plants and leaves; EF1 breaks the windows and tears off doors and fences; EF2 takes wooden roofs off and
+  snaps the trees; EF3 brings wooden walls down and uproots trees; EF4 levels half the stone houses; EF5 sweeps
+  houses away to their floors and scours the ground. Blocks are flung round it, mobs caught in it are hurt, and with
+  KNOCKBACK on it throws you if you're near it. Like every laser but the Earthquake and the Tsunami, the J-Alert
+  poles round you sound the general alert.
 - **The Fold** (page four, fork version only for now: greyed out in the native `orbital.hnmod`). A glint high in the sky. You hear it long before you see it: a drop of liquid metal, 3,600 blocks up, falling for
   seven seconds on a rope of smoke. Right over the target it brakes over a second, the fire and the smoke pouring on past it, hangs, and is let
   go. It goes into the land like a stone into water. Rings run out, sharpen into twelve creases and five rings, one pattern, and the sheet
@@ -552,6 +562,8 @@ The wheel also has:
 | `/orbital quakefalse on\|off` | a false earthquake alert: the Earthquake Early Warning goes out for the quake picked (the phone's chime, the poles', the warning over the hotbar) but no quake comes, and it is called off later ("Earthquake alert canceled", with the EEW's cancellation sound); off by default; kept; the wheel's FALSE ALERT at the end of the QUAKE row |
 | `/orbital quakecancel SECONDS\|2m` | how long after a false alert's warning it is canceled, 10 s to 10 min (1 min by default); kept; the wheel's CANCEL IN (in SHAKING's place while FALSE ALERT is on) |
 | `/orbital cancelalert` | a false alert under way canceled now; also the wheel's CANCEL beside STOP while one is |
+| `/orbital strikedelay SECONDS\|5m\|now` | the time before every laser strikes, 10 s to 30 min (`now`, the default, as fired): its warning first, its name as a title, "strikes in m:ss" over the hotbar and the J-Alert's general alert from the poles (an Earthquake's countdown has no sirens; the Tsunami keeps its own ARRIVAL); kept; the wheel's DELAY by the flying speed |
+| `/orbital tornadoef ef0\|…\|ef5` | the Tornado's rating on the Enhanced Fujita scale (EF3 by default); kept; the wheel's RATING row |
 | `/orbital alertsirens on\|off` | the J-Alert poles' general alert for every laser but the Earthquake and the Tsunami: poles put up on the land round you, sounding the alert as the strike runs, heard from the nearest as all sirens are, at `/orbital sirenvolume` (on by default); kept |
 | `/orbital tsunamitime SECONDS\|5m\|auto` | the countdown from an Earthquake's tsunami warning (3 minutes after the quake) to its first wave, 10 to 900 seconds or minutes as `5m`; `auto` (the default) a strike's own 3 to 8 minutes; kept |
 | `/orbital sirenvolume PERCENT` | the Earthquake's sirens and disaster radio, 0 to 200 (100 by default; 0 none); kept |
