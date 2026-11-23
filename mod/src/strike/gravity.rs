@@ -61,6 +61,7 @@ pub fn reach(key: &str) -> Option<f64> {
         "nuke" => 300.0,
         "rod" => 250.0,
         "supercell" => 120.0,
+        "tornado" => 200.0,
         "hurricane" => 170.0,
         "tsunami" => 360.0,
         "fold" => 360.0,

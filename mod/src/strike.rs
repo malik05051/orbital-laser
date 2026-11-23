@@ -22,6 +22,8 @@ pub use quake::{QK_CUSTOM, QK_DEPTH, QK_MW, QK_PRESETS, QK_SHAKING, QK_TSU_MW, Q
 pub use qk_sea::{QT_AUTO, QT_COUNTDOWN_MAX, auto_countdown as qk_auto_countdown, activate as qk_activate, take_active as qk_take_active, take_pending as qk_take_pending, active_sea as qk_active_sea, on_sea_axis as qk_on_sea_axis, net_heard as qk_net_heard, alert_config, alert_configure, AlertConfig};
 #[cfg(test)]
 pub(crate) use tsunami::TsConfig;
+pub use storm::{TORNADO_EF, set_tornado_ef, tornado_ef};
+pub use warning::{DELAY_MAX, delay as warn_delay, delay_step as warn_delay_step, delay_text as warn_delay_text, set_delay as warn_set_delay, warns, warning_plan};
 pub(crate) use tsunami::{TS_ARRIVAL_MAX, ts_arrival_step, ts_arrival_text, ts_config, ts_configure, ts_height_step, ts_height_text, ts_k_for, ts_scale, ts_set_scale};
 mod sb_hand;
 mod sb_lift;
@@ -40,6 +42,7 @@ mod vc_mount;
 mod vc_sound;
 mod volcano;
 mod vortex;
+mod warning;
 
 /// The Hurricane's wind, for its carry of the player (carry.rs).
 pub(crate) use tsunami::{TS_DRAIN, TS_HOLD, TS_LEN, TsGeo};
@@ -730,6 +733,9 @@ pub fn plan(laser: &'static Laser, target: &Target, terrain: bool, dimension: &s
     }
     if laser.key == "hurricane" {
         return hurricane::hurricane_plan(laser, target, terrain, dimension, shader_seed, me);
+    }
+    if laser.key == "tornado" {
+        return storm::tornado_plan(laser, target, terrain, dimension, shader_seed, me, approach);
     }
     if laser.key == "carpetbomb" {
         return carpet::carpet_plan(laser, target, terrain, dimension, shader_seed, me);
@@ -4514,7 +4520,7 @@ mod tests {
             // (nor is the supercell: it leaves only pits, tracks and a small crater; strike/storm.rs's tests check them)
             // (nor the hurricane: it tears up only what stands on the land and its top; strike/hurricane.rs's tests check it)
             // (nor the tsunami: it sweeps what stands on the land it read, under its water; strike/tsunami.rs's tests check it)
-            if laser.key == "payload" || laser.key == "nuke" || laser.key == "rod" || laser.key == "supercell" || laser.key == "hurricane" || laser.key == "tsunami" || laser.key == "fold" || laser.key == "supervolcano" || laser.key == "skybreak" || laser.key == "carpetbomb" || laser.key == "earthquake" {
+            if laser.key == "payload" || laser.key == "nuke" || laser.key == "rod" || laser.key == "supercell" || laser.key == "tornado" || laser.key == "hurricane" || laser.key == "tsunami" || laser.key == "fold" || laser.key == "supervolcano" || laser.key == "skybreak" || laser.key == "carpetbomb" || laser.key == "earthquake" {
                 continue;
             }
             for (dimension, sky) in [("minecraft:overworld", 319), ("minecraft:the_nether", 122)] {

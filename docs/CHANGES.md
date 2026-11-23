@@ -2,6 +2,20 @@
 
 What each release of Orbital Laser added, newest first. The current release is in the [README](../README.md#new-in-0514); each release's notes are in [docs/releases](releases).
 
+## Unreleased
+
+- **The Tornado**, the twenty-first laser, next to the Hurricane on the wheel (page three) and `/orbital tornado`. A
+  supercell's storm forms over the target and one tornado comes down out of its wall cloud, crossing the land through
+  the target. Its rating on the Enhanced Fujita scale (the wheel's RATING row, `/orbital tornadoef`: EF0 to EF5, by the
+  NWS's 3-second gusts) sets how wide it is, how loud, and what it wrecks, as the scale's damage goes: from plants and
+  leaves at EF0 to houses swept away and the ground scoured at EF5. The J-Alert poles sound the general alert.
+- **A time before every strike** (the wheel's DELAY, `/orbital strikedelay`, 10 s to 30 min): fired with one, a laser
+  warns first (its name, "strikes in m:ss", the general alert from the poles), then strikes at its target. The
+  Earthquake's countdown has no sirens (an earthquake can't be foreseen); the Tsunami keeps its ARRIVAL.
+- **The general alert is heard**: it was added after a strike's plan was put in time order, so it and the poles came
+  after everything else, too late or never. Every laser's strike now sounds it from the poles round you. The poles
+  stand in the same places from one strike to the next.
+
 ## 0.6.0
 
 The release's notes: [docs/releases/v0.6.0.md](releases/v0.6.0.md). It's the first the fork's launcher installs (`tools/package_mod.py`).

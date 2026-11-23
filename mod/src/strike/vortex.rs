@@ -9,15 +9,14 @@
 //!   leaves torn off the trees it passes through, the grass scoured to dirt, a few blocks thrown up and out. No digging.
 //! - `roar`: its roar played where it is, again every second as it moves, so the sound follows it.
 //!
-//! A full tornado: the same `Funnel` with a touch radius of 30-80 and a slower, longer wander (a minute or more, the
-//! keep-in radius wider); `scour` taking more (logs felled, the top block torn up in patches, many more thrown); the
-//! pass's `vx_radius` scaled with the touch radius and its debris cloud with it; the roar louder and further heard.
+//! - `track`, `wreck`, `roar_as`: the Tornado's (storm.rs's `tornado_plan`): a straight track, what it wrecks by its EF
+//!   rating, its roar louder and deeper; the pass's `vx_radius` and debris cloud scale with its touch radius.
 use super::{Act, Blocks, Plan, TIDY_FLOWERS, TIDY_LOOSE, mh, vnoise};
 use std::f64::consts::PI;
 
 /// Seconds between a funnel's track samples, the most samples a funnel has, and the pass's words for one.
 pub(super) const VX_DT: f64 = 0.5;
-pub(super) const VX_S: usize = 48;
+pub(super) const VX_S: usize = 96;
 pub(super) const VX_W: usize = 4 + 3 * VX_S;
 /// Seconds a funnel takes to come down out of the cloud to the land, and to lift back off it.
 pub(super) const VX_DOWN: f64 = 3.5;
@@ -184,17 +183,221 @@ pub(super) fn scour(q: &mut Plan, f: &Funnel, k0: usize, k1: usize, cx: i32, cz:
     }
 }
 
+/// What a tornado of EF rating `ef` wrecks where it touches, over its track's samples k0..k1 (`scour`'s light work done
+/// harder): each column within its touch radius once, the core (inside 55% of it) at its rating and the edge one less,
+/// each rating doing what the ones under it do and more, as the Enhanced Fujita scale's damage goes:
+/// - EF0: the loose plants gone, leaves torn off in patches, the grass scoured in streaks.
+/// - EF1: every leaf, the windows (glass panes, glass) broken, doors, trapdoors and fences torn away.
+/// - EF2: wooden roofs off (their stairs and slabs, the planks under), the trees' crowns snapped.
+/// - EF3: wooden walls down, trees uprooted whole, stone roofs and walls off, beds and wool gone.
+/// - EF4: cobblestone, brick, stone brick and terracotta houses half levelled, all roofs.
+/// - EF5: every house swept away to its floor, the ground itself scoured (its top to coarse dirt and gravel).
+/// Blocks are thrown up and out round it (`throw`), more and heavier the stronger it is. (cx, cz): the storm's middle.
+/// A tornado's wrecking under way (`wreck_stage`): its funnel, the storm's middle, its rating, how far along its track
+/// the columns it reaches have been found, those found, and those still to wreck (x, z, when, at what rating).
+pub(super) struct Wreck {
+    pub f: std::rc::Rc<Funnel>,
+    pub cx: i32,
+    pub cz: i32,
+    pub seed: u32,
+    pub ef: u8,
+    next_k: usize,
+    seen: crate::ground::FxSet<(i32, i32)>,
+    queue: std::collections::VecDeque<(i32, i32, f32, u8)>,
+}
+impl Wreck {
+    pub fn new(f: std::rc::Rc<Funnel>, cx: i32, cz: i32, seed: u32, ef: u8) -> Wreck {
+        Wreck { f, cx, cz, seed, ef, next_k: 0, seen: Default::default(), queue: Default::default() }
+    }
+    /// The columns sample k reaches first (a little ragged), queued: the core (inside 55% of its touch radius) at its
+    /// rating, the edge one less; and the blocks it throws.
+    fn find(&mut self, q: &mut Plan, k: usize) {
+        let f = self.f.clone();
+        let t = f.t0 + k as f64 * VX_DT;
+        if f.touch(t) < 0.5 {
+            return;
+        }
+        let r = f.touch_r;
+        let ri = (r * 1.15).ceil() as i32 + 1;
+        let [px, pz] = f.path[k];
+        let (fx, fz) = (f64::from(self.cx) + 0.5 + px, f64::from(self.cz) + 0.5 + pz);
+        let (ix, iz) = (fx.floor() as i32, fz.floor() as i32);
+        crate::meter::spend(30 * ((2 * ri + 1) * (2 * ri + 1)) as u64);
+        for dz in -ri..=ri {
+            for dx in -ri..=ri {
+                let (x, z) = (ix + dx, iz + dz);
+                let d = (f64::from(x) + 0.5 - fx).hypot(f64::from(z) + 0.5 - fz);
+                if d > r * 1.15 || self.seen.contains(&(x, z)) {
+                    continue;
+                }
+                crate::meter::spend(250);
+                if d > r * (0.8 + 0.35 * vnoise(f64::from(x), f64::from(z), 3.0, self.seed ^ 0x51)) {
+                    continue;
+                }
+                self.seen.insert((x, z));
+                let level = if d < 0.55 * r { self.ef } else { self.ef.saturating_sub(1) };
+                self.queue.push_back((x, z, t as f32, level));
+            }
+        }
+        if k % 2 == 0 {
+            for j in 0..1 + u32::from(self.ef) / 2 {
+                throw(q, &f, k, j, fx, fz, t, self.seed, self.ef);
+            }
+        }
+    }
+}
+/// The edits that wreck column (x, z) at `level`, as the Enhanced Fujita scale's damage goes, each rating doing what
+/// the ones under it do and more:
+/// - EF0: the loose plants gone, leaves torn off in patches, the grass scoured in streaks.
+/// - EF1: every leaf, the windows (glass panes, glass) broken, doors, trapdoors and fences torn away.
+/// - EF2: wooden roofs off (their stairs and slabs, the planks under), the trees' crowns snapped.
+/// - EF3: wooden walls down, trees uprooted whole, stone roofs and walls off, beds and wool gone.
+/// - EF4: cobblestone, brick, stone brick and terracotta houses half levelled, all roofs.
+/// - EF5: every house swept away to its floor, the ground itself scoured (its top to coarse dirt and gravel).
+/// How many edits it made.
+fn wreck_column(b: &mut Blocks, x: i32, z: i32, level: u8, seed: u32) -> u64 {
+    const WOOD_OPEN: [&str; 4] = ["#minecraft:wooden_doors", "#minecraft:wooden_trapdoors", "#minecraft:wooden_fences", "#minecraft:fence_gates"];
+    const GLASS: [&str; 2] = ["minecraft:glass_pane", "#minecraft:impermeable"];
+    const STONE: [&str; 6] = ["minecraft:cobblestone", "minecraft:mossy_cobblestone", "minecraft:bricks", "#minecraft:stone_bricks", "#minecraft:terracotta", "minecraft:hay_block"];
+    let n0 = b.runs.len();
+    let h = (x as u32).wrapping_mul(73_856_093) ^ (z as u32).wrapping_mul(19_349_663);
+    let roll = |kk: u32| mh(h, seed, kk);
+    b.put(x, z, 0, 3, "minecraft:air", Some(TIDY_LOOSE), true);
+    b.put(x, z, 0, 2, "minecraft:air", Some(TIDY_FLOWERS), true);
+    if level >= 1 || roll(0x70) < 0.5 {
+        b.put(x, z, 0, 28, "minecraft:air", Some("#minecraft:leaves"), true);
+    }
+    if roll(0x5c) < 0.3 + 0.12 * f64::from(level) {
+        let to = if level >= 5 && roll(0x71) < 0.4 { "minecraft:gravel" } else if roll(0x5d) < 0.6 { "minecraft:coarse_dirt" } else { "minecraft:dirt" };
+        b.put(x, z, -1, -1, to, Some("minecraft:grass_block"), true);
+    }
+    if level >= 1 {
+        for g in GLASS {
+            b.put(x, z, -12, -1, "minecraft:air", Some(g), true);
+        }
+        for w in WOOD_OPEN {
+            b.put(x, z, -12, -1, "minecraft:air", Some(w), true);
+        }
+    }
+    if level >= 2 {
+        b.put(x, z, -8, -1, "minecraft:air", Some("#minecraft:wooden_stairs"), true);
+        b.put(x, z, -8, -1, "minecraft:air", Some("#minecraft:wooden_slabs"), true);
+        b.put(x, z, -3, -1, "minecraft:air", Some("#minecraft:planks"), true);
+        b.put(x, z, -6, -1, "minecraft:air", Some("#minecraft:logs"), true);
+    }
+    if level >= 3 {
+        b.put(x, z, -14, -1, "minecraft:air", Some("#minecraft:planks"), true);
+        b.put(x, z, -32, -1, "minecraft:air", Some("#minecraft:logs"), true);
+        b.put(x, z, -6, -1, "minecraft:air", Some("#minecraft:stairs"), true);
+        b.put(x, z, -6, -1, "minecraft:air", Some("#minecraft:slabs"), true);
+        b.put(x, z, -6, -1, "minecraft:air", Some("#minecraft:walls"), true);
+        b.put(x, z, -14, -1, "minecraft:air", Some("#minecraft:beds"), true);
+        b.put(x, z, -14, -1, "minecraft:air", Some("#minecraft:wool"), true);
+    }
+    if level >= 5 || (level >= 4 && roll(0x72) < 0.6) {
+        let depth = if level >= 5 { -16 } else { -10 };
+        for s in STONE {
+            b.put(x, z, depth, -1, "minecraft:air", Some(s), true);
+        }
+        b.put(x, z, -12, -1, "minecraft:air", Some("#minecraft:stairs"), true);
+        b.put(x, z, -12, -1, "minecraft:air", Some("#minecraft:slabs"), true);
+    }
+    if level >= 5 && roll(0x73) < 0.45 {
+        b.put(x, z, -1, -1, "minecraft:air", Some("minecraft:dirt"), true);
+    }
+    (b.runs.len() - n0) as u64
+}
+/// How much a stage of `wreck_stage` works at most (the meter's count: an edit's work counted at what it costs).
+const WRECK_BUDGET: u64 = 5_000_000;
+const WRECK_EDIT: u64 = 900;
+/// One stage of a tornado's wrecking at strike second `now`: the columns its track reaches up to a second ahead found
+/// and queued, then as many of the queued wrecked (`wreck_column`) as the stage's budget allows, each due as the funnel
+/// reaches it; again a little later while any are left. So however wide it is, no tick does more than its share.
+pub(super) fn wreck_stage(q: &mut Plan, w: std::rc::Rc<std::cell::RefCell<Wreck>>, now: f64) {
+    let more = {
+        let mut wr = w.borrow_mut();
+        let f = wr.f.clone();
+        while wr.next_k < f.path.len() && f.t0 + wr.next_k as f64 * VX_DT <= now + 1.0 && crate::meter::spent() < WRECK_BUDGET / 2 {
+            let k = wr.next_k;
+            wr.find(q, k);
+            wr.next_k += 1;
+        }
+        let mut b = Blocks::default();
+        let mut when: crate::ground::FxMap<(i32, i32), f32> = Default::default();
+        while crate::meter::spent() < WRECK_BUDGET {
+            let Some((x, z, t, level)) = wr.queue.pop_front() else { break };
+            let seed = wr.seed;
+            let n = wreck_column(&mut b, x, z, level, seed);
+            crate::meter::spend(WRECK_EDIT * n);
+            when.insert((x, z), t);
+        }
+        for (t, e) in b.split_by(|x, z| when.get(&(x, z)).copied().unwrap_or(0.0)) {
+            q.ev.push((t, Act::Blocks(Box::new(e))));
+        }
+        wr.next_k < f.path.len() || !wr.queue.is_empty()
+    };
+    if more {
+        let next = now + 0.1;
+        q.later(next as f32, move |q| wreck_stage(q, w, next));
+    }
+}
+/// A block thrown up off the land round a tornado's foot at sample k (the j-th then), spun round it and flung out: a
+/// falling block, coming down a few seconds later off the track. What it is goes by the rating: soil and leaves,
+/// then wood, then stone.
+#[allow(clippy::too_many_arguments)]
+fn throw(q: &mut Plan, f: &Funnel, k: usize, j: u32, fx: f64, fz: f64, t: f64, seed: u32, ef: u8) {
+    let i = k as u32 * 7 + j;
+    let r = f.touch_r;
+    let a = 2.0 * PI * mh(i, seed, 0x5e);
+    let (ox, oz) = (a.cos() * r * 0.8, a.sin() * r * 0.8);
+    let w = 0.45 + 0.1 * f64::from(ef);
+    let (vx, vz) = (-a.sin() * w + a.cos() * 0.25, a.cos() * w + a.sin() * 0.25);
+    let vy = 0.7 + 0.12 * f64::from(ef) + 0.4 * mh(i, seed, 0x5f);
+    let pool: &[&str] = match ef {
+        0 | 1 => &["minecraft:dirt", "minecraft:coarse_dirt", "minecraft:oak_leaves", "minecraft:gravel"],
+        2 | 3 => &["minecraft:oak_planks", "minecraft:spruce_log", "minecraft:oak_leaves", "minecraft:dirt", "minecraft:glass"],
+        _ => &["minecraft:cobblestone", "minecraft:bricks", "minecraft:oak_planks", "minecraft:oak_log", "minecraft:stone_bricks", "minecraft:gravel"],
+    };
+    let blk = pool[(mh(i, seed, 0x60) * pool.len() as f64) as usize % pool.len()];
+    let (x, z) = ((fx + ox).floor() as i32, (fz + oz).floor() as i32);
+    q.ev.push((
+        t as f32,
+        Act::Cmd(format!(
+            "execute positioned {x} 0 {z} positioned over motion_blocking_no_leaves run summon minecraft:falling_block ~ ~0.5 ~ {{BlockState:{{Name:\"{blk}\"}},Time:1,DropItem:0b,CancelDrop:1b,Motion:[{vx:.3}d,{vy:.3}d,{vz:.3}d]}}"
+        )),
+    ));
+}
+/// A straight track for a tornado: from `start` (off the storm's middle) heading `h` at `speed` blocks a second, its
+/// foot weaving a little either side (`weave` blocks), from `t0` for as long as the table holds (VX_S samples).
+pub(super) fn track(seed: u32, start: [f64; 2], h: f64, speed: f64, weave: f64, t0: f64, touch_r: f64) -> Funnel {
+    let (w1, p1, w2, p2) = (0.18 + 0.1 * mh(1, seed, 0x7b), 2.0 * PI * mh(2, seed, 0x7b), 0.5 + 0.2 * mh(3, seed, 0x7b), 2.0 * PI * mh(4, seed, 0x7b));
+    let (dir, side) = ([h.cos(), h.sin()], [-h.sin(), h.cos()]);
+    let path: Vec<[f64; 2]> = (0..VX_S)
+        .map(|i| {
+            let t = i as f64 * VX_DT;
+            let along = speed * t;
+            let off = weave * ((w1 * t + p1).sin() + 0.3 * (w2 * t + p2).sin());
+            [start[0] + dir[0] * along + side[0] * off, start[1] + dir[1] * along + side[1] * off]
+        })
+        .collect();
+    Funnel { t0, t1: t0 + (VX_S - 1) as f64 * VX_DT, path, touch_r }
+}
+
 /// The funnel's roar, played where it is every second of its life (each a few seconds long, faded in and out, so they
 /// overlap into one that moves with it): quieter while it is aloft. `track`: the land under its track over `c`'s
 /// (`ground_track`).
 pub(super) fn roar(q: &mut Plan, f: &Funnel, event: &str, c: [f64; 3], track: &[f64]) {
+    roar_as(q, f, event, c, track, 1.0, 1.0);
+}
+/// `roar`, `gain` times as loud (past 1, heard further off) and at `pitch`: a tornado's, by its rating.
+pub(super) fn roar_as(q: &mut Plan, f: &Funnel, event: &str, c: [f64; 3], track: &[f64], gain: f32, pitch: f32) {
     let mut t = f.t0;
     while t < f.t1 - 0.5 {
         let p = f.at(t + 0.8);
         let k = (((t + 0.8 - f.t0) / VX_DT).round() as usize).min(track.len().saturating_sub(1));
         let at = [c[0] + p[0], c[1] + track.get(k).copied().unwrap_or(0.0) + 6.0, c[2] + p[1]];
         let v = 0.45 + 0.55 * f.touch(t + 0.8);
-        q.ev.push((t as f32, Act::Sound { event: event.to_string(), at: Some(at), volume: v as f32, pitch: 1.0 }));
+        q.ev.push((t as f32, Act::Sound { event: event.to_string(), at: Some(at), volume: v as f32 * gain, pitch }));
         t += 1.0;
     }
 }

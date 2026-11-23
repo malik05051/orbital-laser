@@ -27,11 +27,11 @@ const SC_B: u32 = 16u;             // the table: the bolts from SC_B, SC_BW word
 const SC_BW: u32 = 4u;             // in the order they strike
 const SC_NB: u32 = 140u;           // (room for this many)
 const SC_F: u32 = 576u;            // the funnels from SC_F, VX_W words each (vortex.rs's vx_words)
-const VX_W: u32 = 148u;
+const VX_W: u32 = 292u;
 const VX_DT: f32 = 0.5;
 const VX_DOWN: f32 = 3.5;
-const SC_K: u32 = 1024u;           // the flickers in the cloud from SC_K (t, x, z)
-const SC_I: u32 = 1192u;           // for each whole second, the first bolt still seen then (a u32)
+const SC_K: u32 = 1452u;           // the flickers in the cloud from SC_K (t, x, z)
+const SC_I: u32 = 1620u;           // for each whole second, the first bolt still seen then (a u32)
 const SC_NI: u32 = 64u;
 // The cloud's heights over the target's ground: the deck's base, the wall cloud's (lower, under its middle), the
 // deck's top, the tower's, and the anvil's underside and top.
@@ -42,6 +42,19 @@ const SC_TOWER: f32 = 315.0;
 const SC_ANV0: f32 = 270.0;
 const SC_ANV1: f32 = 335.0;
 
+// The Tornado (storm.rs's tornado_plan) draws the same storm: its table's header gives the finale's time (the table's
+// word 1: far off, no finale) and how long the storm lasts (word 5; 0 the Supercell's SC_LEN).
+fn sc_fin_t() -> f32 {
+    let f = sc_w(1u);
+    return select(SC_FINALE, f, f > 0.0);
+}
+fn sc_len() -> f32 {
+    let l = sc_w(5u);
+    return select(SC_LEN, l, l > 0.0);
+}
+fn sc_clear() -> f32 {
+    return SC_CLEAR + sc_len() - SC_LEN;
+}
 fn sc_w(i: u32) -> f32 {
     if (i >= arrayLength(&mod_data)) {
         return 0.0;
@@ -101,7 +114,7 @@ fn sc_form(t: f32) -> f32 {
     return smoothstep(0.0, SC_FORMED, t);
 }
 fn sc_fade(t: f32) -> f32 {
-    return 1.0 - smoothstep(SC_CLEAR, SC_LEN - 1.0, t);
+    return 1.0 - smoothstep(sc_clear(), sc_len() - 1.0, t);
 }
 // How far out the deck reaches, and the anvil.
 fn sc_deck_r(t: f32) -> f32 {
@@ -112,7 +125,7 @@ fn sc_anvil_r(t: f32) -> f32 {
 }
 // How heavily it rains (0 to 1).
 fn sc_rain(t: f32) -> f32 {
-    return smoothstep(3.5, 8.0, t) * (1.0 - smoothstep(SC_CLEAR - 1.0, SC_CLEAR + 3.0, t));
+    return smoothstep(3.5, 8.0, t) * (1.0 - smoothstep(sc_clear() - 1.0, sc_clear() + 3.0, t));
 }
 // The deck's base over the ground at r out (the wall cloud hangs lower under its middle).
 fn sc_base(r: f32) -> f32 {
@@ -234,12 +247,12 @@ fn sc_is_run(t: f32) -> bool {
 }
 // The hush before the crack (SC_SUCK, storm.rs's FIN_SUCK, in the strike's time): 1 in it, the light held back.
 fn sc_hush(t: f32) -> f32 {
-    let tf = t - SC_FINALE;
+    let tf = t - sc_fin_t();
     return select(0.0, smoothstep(-SC_SUCK, -SC_SUCK + 0.03, tf), tf < 0.0);
 }
 // How much of the run-in's bolts is still seen at `t`: none from the hush on.
 fn sc_hushcut(t: f32) -> f32 {
-    return 1.0 - smoothstep(SC_FINALE - SC_SUCK, SC_FINALE - SC_SUCK + 0.03, t);
+    return 1.0 - smoothstep(sc_fin_t() - SC_SUCK, sc_fin_t() - SC_SUCK + 0.03, t);
 }
 // Whether run-in bolt i arcs in out of the ring round the wall cloud (its root out in the ring, its channel running in
 // under the cloud's base before it drops onto its foot), and if so its root and the bend where it turns down.
@@ -446,8 +459,12 @@ fn vx_at(k: u32, t: f32, C: vec3<f32>) -> VxFunnel {
 // The funnel's radius at s of its way up (0 its foot, 1 the cloud's base): a narrow foot, flaring into the wide cone it
 // hangs from; thinned to a rope as it dies.
 fn vx_radius(f: VxFunnel, s: f32) -> f32 {
-    let foot = (1.0 + 0.4 * f.r) * mix(1.0, 0.55, f.rope);
-    let cone = mix(VX_RT, VX_RT * 0.35, f.rope);
+    // (a landspout's foot narrow; a tornado's (touch radius past 6) as wide as what it wrecks, a wedge at the strongest,
+    // its cone wider still where it leaves the cloud)
+    let wide = smoothstep(6.0, 20.0, f.r);
+    let foot = mix(1.0 + 0.4 * f.r, 0.85 * f.r, wide) * mix(1.0, 0.55, f.rope);
+    let rt = max(VX_RT, 1.3 * mix(1.0 + 0.4 * f.r, 0.85 * f.r, wide));
+    let cone = mix(rt, rt * 0.35, f.rope);
     // (and as it lowers, its tip a narrowing point)
     let tip = smoothstep(f.low - 0.02, f.low + 0.3, s);
     return mix(foot, cone, pow(s, mix(3.5, 5.0, f.rope))) * mix(0.25, 1.0, tip);
@@ -464,7 +481,7 @@ fn vx_axis(f: VxFunnel, s: f32, t: f32) -> vec3<f32> {
 }
 // How far round the funnel reaches from its axis (the march's bound): the cone, the debris cloud.
 fn vx_bound(f: VxFunnel) -> f32 {
-    return VX_RT + 14.0 + 3.0 * f.r;
+    return max(VX_RT, 1.15 * f.r) + 14.0 + 3.0 * f.r;
 }
 // The funnel at camera-relative p: x its density, y its dust's, z how far it lies out on the funnel's surface (0 at the
 // axis, 1 at its edge: the shading's side), w the striation there.
@@ -486,11 +503,13 @@ fn vx_den(f: VxFunnel, p: vec3<f32>, t: f32) -> vec4<f32> {
     // (the debris cloud whirled round its foot: squat, ragged, dust-coloured, turning fast, wider than the funnel)
     var dust = 0.0;
     let hy = p.y - f.foot.y;
-    if (f.debris > 0.01 && hy < 26.0) {
+    // (a tornado's cloud taller and wider, with its funnel)
+    let big = 1.0 + max(f.r - 6.0, 0.0) / 14.0;
+    if (f.debris > 0.01 && hy < 26.0 * big) {
         let dd = length((p - f.foot).xz);
         let thd = atan2((p - f.foot).z, (p - f.foot).x) - 7.0 * t - f.spin;
-        let rd0 = (5.0 + 2.6 * f.r) * (0.8 + 0.45 * gnoise3(vec3<f32>(cos(thd) * 1.8, sin(thd) * 1.8, hy * 0.12 - t * 0.6 + f.spin)));
-        let top = 7.0 + 14.0 * smoothstep(rd0, 0.0, dd);
+        let rd0 = (5.0 + 2.6 * min(f.r, 8.0) + 1.25 * max(f.r - 8.0, 0.0)) * (0.8 + 0.45 * gnoise3(vec3<f32>(cos(thd) * 1.8, sin(thd) * 1.8, hy * 0.12 - t * 0.6 + f.spin)));
+        let top = (7.0 + 14.0 * smoothstep(rd0, 0.0, dd)) * big;
         dust = smoothstep(rd0, rd0 * 0.45, dd) * smoothstep(top, top * 0.3, hy) * smoothstep(-1.5, 1.0, hy) * f.debris;
         dust = dust * (0.55 + 0.45 * sin(3.0 * thd + hy * 0.4)) * 1.7;
     }
@@ -905,7 +924,7 @@ fn supercell(in: StageIn, stage: u32, up: vec4<f32>) -> PlOut {
     // (and the brightest bolt's own light on the land)
     var gflash = vec3<f32>(0.0);
     var sky_flash = 0.0;
-    let tf = time - SC_FINALE;
+    let tf = time - sc_fin_t();
     if (have) {
         let nb = min(u32(sc_w(0u) + 0.5), SC_NB);
         for (var i = sc_first(time); i < nb; i = i + 1u) {
@@ -1006,7 +1025,7 @@ fn supercell(in: StageIn, stage: u32, up: vec4<f32>) -> PlOut {
     if (stage == 2u) {
         col = col * up.a + up.rgb;
         vol_a = up.a;
-    } else if (time < SC_LEN) {
+    } else if (time < sc_len()) {
         let j = ign(in.position.xy + vec2<f32>(fract(time * 7.0) * 37.0, 0.0));
         let v = sc_volume(rd, scene_len, C, time, j, fl, L, amb, sunc, true);
         vol_t = v.t;
@@ -1189,7 +1208,7 @@ fn sc_heard() -> vec2<f32> {
     let C = vec3<f32>(anchor_xz().x, block_y() + 1.0, anchor_xz().y);
     let me = vec3<f32>(frame.mod_params[3].x, frame.mod_params[3].y, frame.mod_params[3].z);
     let dist = length(me - C);
-    return vec2<f32>(now() - SC_FINALE - 0.05 - dist / 343.0, clamp(1.5 / (1.0 + dist / 350.0), 0.2, 1.0));
+    return vec2<f32>(now() - sc_fin_t() - 0.05 - dist / 343.0, clamp(1.5 / (1.0 + dist / 350.0), 0.2, 1.0));
 }
 fn sc_jolt(in: StageIn) -> StageIn {
     let h = sc_heard();

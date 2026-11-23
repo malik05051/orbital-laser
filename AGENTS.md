@@ -474,7 +474,12 @@ laser, command, capability and timing). This file is the short, factual version 
   alertsirens`) in lib.rs's `fire_at`. Two strikes have no pass (`fire_plain`): `FALSE_ALERT` (`quake::quake_false_plan`,
   `qk_false`, `/orbital quakefalse`, `quakecancel`, `cancelalert` → lib.rs's `cancel_alert`) and `TS_COUNTDOWN`
   (`tsunami::ts_countdown_plan`, `TsConfig::arrival` up to 1800 s, handing over to the Tsunami through
-  `qk_sea::set_pending` and `tsunami_after`, as the Earthquake does). Every tsunami siren is `quake.major`., in the JMA's patterns; the sounds by `tools/sounds_quake.py` (`quake.siren3`,
+  `qk_sea::set_pending` and `tsunami_after`, as the Earthquake does). Every tsunami siren is `quake.major`.
+  A delay before any strike (`strike/warning.rs`, `/orbital strikedelay`, the wheel's DELAY) fires a `WARNING` plain
+  strike first whose `then` fires the laser as it ends. The alert plan is merged into a strike's plan and the plan
+  sorted again (a strike takes its plan in order). The Tornado (`storm.rs`'s `tornado_plan`, `TORNADO_EF`,
+  `vortex::track`/`wreck`/`roar_as`, the Supercell's pass with no finale: the table's word 1 the finale's time, word 5
+  the storm's length) is laser index 20, next to the Hurricane., in the JMA's patterns; the sounds by `tools/sounds_quake.py` (`quake.siren3`,
   `siren5`, `chime_up`, `chime_down`, `eew`, each with `_far`); `quake.nhk_alert`, `quake.siren` and `quake/eew.ogg` (with `eew_far`, which `build_mod.py`
   puts in for `quake.eew` when present) are the user's own recordings, git-ignored. The pass sways the whole picture by the shaking where the camera is (never a pixel by where it
   is in the world). Keep earthquake.wgsl's `QK_*`, `qk_preset` and `qk_pulse` in step with `QK_PRESETS` and

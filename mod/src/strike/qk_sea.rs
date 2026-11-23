@@ -479,6 +479,8 @@ fn build_stage(q: &mut Plan, geo: Rc<QkGeo>, st: SeaTime, t: [f64; 3], nm: [f64;
 /// has none. What the poles broadcast is heard from the nearest that is up (`net_heard`), so there are sirens
 /// wherever there is land, and none at sea.
 pub const NET_G: i32 = 160;
+/// What places each square's pole, the same for every strike (`square_mid`).
+const NET_SEED: u32 = 0x5e7a_1e7;
 /// Squares whose middle is within this of the player get their pole (the game keeps 12 chunks round them loaded).
 const NET_R: f64 = 190.0;
 /// How far round its square's middle a pole looks for dry land, and the step it looks in.
@@ -486,7 +488,7 @@ const NET_LOOK: i32 = 72;
 const SITE_STEP: i32 = 8;
 /// How often the network looks where the player is (strike seconds), how many of its rounds a square asked about waits
 /// for the world's answer before it is asked again, and how many poles go up a round at most.
-const NET_EVERY: f32 = 1.5;
+const NET_EVERY: f32 = 3.0;
 const NET_WAIT: u32 = 4;
 const NET_BUILD: usize = 4;
 /// The poles' station groups: each group sets its broadcast off on its own (`sirens`), so near one pole it wails while
@@ -524,7 +526,10 @@ pub fn net_stop() {
     NET.with(|n| *n.borrow_mut() = Net::default());
 }
 /// Square (i, j)'s middle, a little off its true middle (each square its own).
-fn square_mid(i: i32, j: i32, seed: u32) -> (i32, i32) {
+/// (the same for every strike: a square's pole stands in the same place each time, the poles a strike put up found
+/// again by the next, never a second one beside it)
+fn square_mid(i: i32, j: i32, _seed: u32) -> (i32, i32) {
+    let seed = NET_SEED;
     let h = (i as u32).wrapping_mul(73_856_093) ^ (j as u32).wrapping_mul(19_349_663);
     let off = |k: u32| ((super::mh(h, seed, k) - 0.5) * 48.0) as i32;
     (i * NET_G + NET_G / 2 + off(0x5e1), j * NET_G + NET_G / 2 + off(0x5e2))
@@ -933,7 +938,8 @@ pub fn alert_sirens(p: &mut Plan, me: [f64; 3], terrain: bool, seed: u32, until:
     let end = until as f32;
     p.later(0.1, move |q| net_watch(q, me, 0.1, end));
     for g in 0..NET_GROUPS {
-        let mut t = 0.6 + super::mh(u32::from(g), seed, 0x5a3) * 4.0 + 2.5 * f64::from(g);
+        // (from 2.5 s: the poles round the player are up by then, the land asked of the world and answered)
+        let mut t = 2.5 + super::mh(u32::from(g), seed, 0x5a3) * 4.0 + 2.5 * f64::from(g);
         while t < until {
             let event = "orbital:quake.alert".to_string();
             p.ev.push((t as f32, Act::Heard { far: format!("{event}_far"), event, at: Vec::new(), volume: QT_POLE_VOL * c.vol, near: QT_NEAR, reach: QT_HEAR, here: false, net: Some(g) }));
@@ -1062,7 +1068,7 @@ mod tests {
         let out = drive(p.ev, 12.0, west_sea_ground, west_sea_water);
         let poles = net_heard(NET_ALL);
         // (a pole in each square near the player with land in it, on that land, its horns nine up)
-        assert!(poles.len() >= 3, "{poles:?}");
+        assert!(poles.len() >= 2, "{poles:?}");
         let nearest = poles.iter().map(|p| (p[0] - me[0]).hypot(p[2] - me[2])).fold(f64::MAX, f64::min);
         assert!(nearest < 160.0, "one near the player: {nearest}");
         assert!(poles.iter().all(|p| p[0] >= 37.0 && p[1] == 75.0), "{poles:?}");
