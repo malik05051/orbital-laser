@@ -2,7 +2,9 @@
 
 What each release of Orbital Laser added, newest first. The current release is in the [README](../README.md#new-in-0514); each release's notes are in [docs/releases](releases).
 
-## Unreleased
+## 0.7.0
+
+The release's notes: [docs/releases/v0.7.0.md](releases/v0.7.0.md).
 
 - **The Tornado**, the twenty-first laser, next to the Hurricane on the wheel (page three) and `/orbital tornado`. A
   supercell's storm forms over the target and one tornado comes down out of its wall cloud, crossing the land through
